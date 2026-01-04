@@ -1,32 +1,30 @@
 import streamlit as st
 import google.generativeai as genai
 
-st.title("S.M.A.R.T. Terminal")
+st.title("S.M.A.R.T. Diagnostika")
 
-# Přímé nastavení bez složitostí
 if "GOOGLE_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-else:
-    st.error("Vložte klíč do Secrets!")
-    st.stop()
-
-# Zkusíme nejstabilnější verzi názvu
-model = genai.GenerativeModel('gemini-1.5-flash')
-
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
-
-if prompt := st.chat_input("Vaše rozkazy, Pane?"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
+    api_key = st.secrets["GOOGLE_API_KEY"]
+    genai.configure(api_key=api_key)
+    
+    st.write("✅ Klíč načten. Prověřuji dostupné modely...")
     
     try:
-        # Žádné systémové instrukce, jen čistý text pro test
-        response = model.generate_content(prompt)
-        st.session_state.messages.append({"role": "assistant", "content": response.text})
-        st.chat_message("assistant").write(response.text)
+        available_models = []
+        for m in genai.list_models():
+            if 'generateContent' in m.supported_generation_methods:
+                available_models.append(m.name)
+        
+        if available_models:
+            st.success("Vaše API vidí tyto modely:")
+            for model_name in available_models:
+                st.write(f"- {model_name}")
+            
+            st.info("Zkopírujte jeden z těchto názvů výše a použijte ho v 'model_name=' ve svém kódu.")
+        else:
+            st.warning("Google nevrátil žádné modely. Váš klíč je pravděpodobně omezený.")
+            
     except Exception as e:
-        st.error(f"Chyba: {e}")
+        st.error(f"Nepodařilo se spojit s Googlem: {e}")
+else:
+    st.error("Klíč nenalezen v Secrets!")
