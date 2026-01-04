@@ -1,30 +1,40 @@
 import streamlit as st
 import google.generativeai as genai
 
-st.title("S.M.A.R.T. Diagnostika")
+st.set_page_config(page_title="S.M.A.R.T. Terminal", page_icon="🤖")
+st.title("S.M.A.R.T. Terminal")
 
+# 1. Načtení klíče
 if "GOOGLE_API_KEY" in st.secrets:
-    api_key = st.secrets["GOOGLE_API_KEY"]
-    genai.configure(api_key=api_key)
-    
-    st.write("✅ Klíč načten. Prověřuji dostupné modely...")
+    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+else:
+    st.error("Chybí API klíč v Secrets!")
+    st.stop()
+
+# 2. Nastavení modelu - POUŽÍVÁME NÁZEV Z VAŠÍ DIAGNOSTIKY
+# Vybral jsem 2.0-flash, který je ve vašem seznamu
+SYSTEM_PROMPT = "Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). Mluv česky a buď jako Jarvis."
+
+model = genai.GenerativeModel(
+    model_name="gemini-2.0-flash", 
+    system_instruction=SYSTEM_PROMPT
+)
+
+# 3. Chatovací historie
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
+
+# 4. Samotná komunikace
+if prompt := st.chat_input("Vaše rozkazy, Pane?"):
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.chat_message("user").write(prompt)
     
     try:
-        available_models = []
-        for m in genai.list_models():
-            if 'generateContent' in m.supported_generation_methods:
-                available_models.append(m.name)
-        
-        if available_models:
-            st.success("Vaše API vidí tyto modely:")
-            for model_name in available_models:
-                st.write(f"- {model_name}")
-            
-            st.info("Zkopírujte jeden z těchto názvů výše a použijte ho v 'model_name=' ve svém kódu.")
-        else:
-            st.warning("Google nevrátil žádné modely. Váš klíč je pravděpodobně omezený.")
-            
+        response = model.generate_content(prompt)
+        st.session_state.messages.append({"role": "assistant", "content": response.text})
+        st.chat_message("assistant").write(response.text)
     except Exception as e:
-        st.error(f"Nepodařilo se spojit s Googlem: {e}")
-else:
-    st.error("Klíč nenalezen v Secrets!")
+        st.error(f"Chyba: {e}")
