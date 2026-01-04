@@ -32,8 +32,10 @@ st.caption("Somewhat Magnificent Artificial Research Technology")
 # --- PŘIPOJENÍ GEMINI ---
 # API klíč si Streamlit vytáhne ze schovaných nastavení (vyřešíme v kroku 4)
 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-model = genai.GenerativeModel(model_name="gemini-1.5-flash", system_instruction=SYSTEM_PROMPT)
-
+model = genai.GenerativeModel(
+    model_name="models/gemini-1.5-flash-latest", # Přidali jsme "models/" a "-latest"
+    system_instruction=SYSTEM_PROMPT
+)
 # --- CHAT LOGIKA ---
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -50,4 +52,5 @@ if prompt := st.chat_input("What are your orders, Sir?"):
     with st.chat_message("assistant"):
         response = model.generate_content(prompt)
         st.write(response.text)
+
         st.session_state.messages.append({"role": "assistant", "content": response.text})
