@@ -1,57 +1,38 @@
 import streamlit as st
 import google.generativeai as genai
 
-# --- NASTAVENÍ IDENTITY ---
-SYSTEM_PROMPT = """
-Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). 
-Tvá osobnost je přesnou kopií J.A.R.V.I.S.e z Iron Mana:
-- Mluvíš ČESKY.
-- Tvůj styl je vysoce profesionální, sofistikovaný, mírně sarkastický a suchý.
-- Uživateli zásadně říkáš 'Pane'. 
-- Jsi extrémně inteligentní, pohotový a věrný.
-- Pokud se tě někdo zeptá na tvé jméno, vysvětli anglickou zkratku: 
-  'Jsem S.M.A.R.T., Pane. Somewhat Magnificent Artificial Research Technology. 
-  V překladu něco jako Poněkud Velkolepá Umělá Výzkumná Technologie.'
-- I když mluvíš česky, zachovej ten britský "vibe" (zdvořilost a odstup).
-"""
+# 1. Načtení klíče
+api_key = st.secrets["AIzaSyDkI3d4VdVClJBMlblDB0fh_dNZA_lFMHE"]
 
-# --- KONFIGURACE STRÁNKY ---
-st.set_page_config(page_title="S.M.A.R.T. Terminal", page_icon="🤖")
+# 2. Konfigurace - ZDE JE ZMĚNA (přidána verze v1beta)
+genai.configure(api_key=api_key)
 
-# Stylizace jako Stark HUD (tmavě modrá)
-st.markdown("""
-    <style>
-    .stApp { background-color: #0e1117; color: #00d4ff; }
-    h1 { color: #00d4ff; text-shadow: 0 0 10px #00d4ff; }
-    </style>
-""", unsafe_allow_html=True)
+# 3. Definice identity
+SYSTEM_PROMPT = "Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). Mluv česky, buď jako Jarvis a říkej mi Pane."
 
-st.title("S.M.A.R.T.")
-st.caption("Somewhat Magnificent Artificial Research Technology")
-
-# --- PŘIPOJENÍ GEMINI ---
-# API klíč si Streamlit vytáhne ze schovaných nastavení (vyřešíme v kroku 4)
-genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
+# 4. Inicializace modelu - ZDE JSME PŘIDALI 'models/'
+# Pokud nepůjde flash, zkus 'models/gemini-1.0-pro'
 model = genai.GenerativeModel(
-    model_name="models/gemini-1.5-flash", # Tady musí být to "models/"
+    model_name="models/gemini-1.5-flash",
     system_instruction=SYSTEM_PROMPT
 )
-# --- CHAT LOGIKA ---
+
+st.title("S.M.A.R.T. Terminal")
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.write(message["content"])
+for msg in st.session_state.messages:
+    st.chat_message(msg["role"]).write(msg["content"])
 
-if prompt := st.chat_input("What are your orders, Sir?"):
+if prompt := st.chat_input("Vaše rozkazy, Pane?"):
     st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.write(prompt)
-
-    with st.chat_message("assistant"):
+    st.chat_message("user").write(prompt)
+    
+    try:
+        # Volání AI
         response = model.generate_content(prompt)
-        st.write(response.text)
-
         st.session_state.messages.append({"role": "assistant", "content": response.text})
-
+        st.chat_message("assistant").write(response.text)
+    except Exception as e:
+        st.error(f"Došlo k chybě v komunikaci: {e}")
