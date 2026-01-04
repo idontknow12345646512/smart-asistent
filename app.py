@@ -16,7 +16,7 @@ else:
 SYSTEM_PROMPT = "Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). Mluv česky a buď jako Jarvis."
 
 model = genai.GenerativeModel(
-    model_name="gemini-2.0-flash", 
+    model_name="gemini-1.5-flash", # Zkusíme tento název, který je aliasem pro flash-latest
     system_instruction=SYSTEM_PROMPT
 )
 
@@ -38,3 +38,4 @@ if prompt := st.chat_input("Vaše rozkazy, Pane?"):
         st.chat_message("assistant").write(response.text)
     except Exception as e:
         st.error(f"Chyba: {e}")
+
