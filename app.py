@@ -1,20 +1,22 @@
 import streamlit as st
 import google.generativeai as genai
-from google.generativeai.types import RequestOptions
 
 st.set_page_config(page_title="S.M.A.R.T. Terminal", page_icon="🤖")
 st.title("S.M.A.R.T. Terminal")
 
 # Načtení klíče
-api_key = st.secrets["GOOGLE_API_KEY"]
+if "GOOGLE_API_KEY" not in st.secrets:
+    st.error("Chybí API klíč v Secrets!")
+    st.stop()
 
-# --- KLÍČOVÁ ZMĚNA: Vynutíme verzi v1 ---
-genai.configure(api_key=api_key, transport='rest') # Přepnuto na REST transport
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
-SYSTEM_PROMPT = "Jsi S.M.A.R.T. Mluv česky, buď jako Jarvis a říkej mi Pane."
-
-# Zkusíme model bez prefixu a s explicitním nastavením
-model = genai.GenerativeModel('gemini-1.5-flash')
+# Definice modelu - zkusíme nejzákladnější stabilní volání
+# Pokud toto vyhodí 404, model pro váš klíč skutečně neexistuje
+try:
+    model = genai.GenerativeModel('gemini-1.5-flash')
+except Exception as e:
+    st.error(f"Nepodařilo se inicializovat model: {e}")
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
@@ -27,13 +29,12 @@ if prompt := st.chat_input("Vaše rozkazy, Pane?"):
     st.chat_message("user").write(prompt)
     
     try:
-        # Použijeme RequestOptions pro vynucení verze API
-        response = model.generate_content(
-            f"{SYSTEM_PROMPT}\n\nUživatel: {prompt}",
-            request_options=RequestOptions(api_version='v1') # Přepnuto na stabilní v1
-        )
+        # Přidáme instrukci přímo do promptu pro maximální stabilitu
+        full_prompt = f"Jsi S.M.A.R.T., mluv česky a říkej mi Pane. Odpověz na: {prompt}"
+        response = model.generate_content(full_prompt)
         
         st.session_state.messages.append({"role": "assistant", "content": response.text})
         st.chat_message("assistant").write(response.text)
     except Exception as e:
-        st.error(f"S.M.A.R.T. Centrála hlásí: {e}")
+        st.error(f"S.M.A.R.T. Centrála hlásí chybu: {e}")
+        st.info("Tip: Pokud vidíte '404', váš klíč nemá přístup k modelu Gemini 1.5 Flash.")
