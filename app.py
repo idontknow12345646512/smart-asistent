@@ -21,8 +21,10 @@ if not api_key or api_key == "sem_vloz_tvuj_klic":
 try:
     genai.configure(api_key=api_key)
     # Zkusíme nejuniverzálnější název modelu
-    model = genai.GenerativeModel(
-        model_name="gemini-1.5-flash",
+        model = genai.GenerativeModel(
+    model_name="gemini-1.5-flash-latest", 
+    system_instruction=SYSTEM_PROMPT
+)
         system_instruction="Jsi S.M.A.R.T., asistent jako Jarvis. Mluv česky a říkej mi Pane."
     )
 except Exception as e:
@@ -56,3 +58,4 @@ if prompt := st.chat_input("Vaše rozkazy, Pane?"):
             st.error(f"❌ S.M.A.R.T. se nemohl spojit s centrálou.")
             st.info("Zkuste v Google AI Studiu vytvořit ÚPLNĚ NOVÝ klíč.")
             st.exception(e) # Toto vypíše detail chyby
+
