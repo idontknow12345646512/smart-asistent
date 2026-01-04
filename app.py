@@ -26,14 +26,14 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.title("S.M.A.R.T. Terminal")
+st.title("S.M.A.R.T.")
 st.caption("Somewhat Magnificent Artificial Research Technology")
 
 # --- PŘIPOJENÍ GEMINI ---
 # API klíč si Streamlit vytáhne ze schovaných nastavení (vyřešíme v kroku 4)
 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 model = genai.GenerativeModel(
-    model_name="models/gemini-1.5-flash-latest", # Přidali jsme "models/" a "-latest"
+    model_name="models/gemini-1.5-flash", # Tady musí být to "models/"
     system_instruction=SYSTEM_PROMPT
 )
 # --- CHAT LOGIKA ---
@@ -54,3 +54,4 @@ if prompt := st.chat_input("What are your orders, Sir?"):
         st.write(response.text)
 
         st.session_state.messages.append({"role": "assistant", "content": response.text})
+
