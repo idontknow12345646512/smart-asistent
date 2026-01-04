@@ -1,43 +1,60 @@
 import streamlit as st
 import google.generativeai as genai
 
-st.set_page_config(page_title="S.M.A.R.T. Terminal", page_icon="🤖")
+# 1. Základní nastavení
+st.set_page_config(page_title="S.M.A.R.T. Terminal", page_icon="🤖", layout="centered")
 st.title("S.M.A.R.T. Terminal")
 
-# 1. Načtení klíče
-if "GOOGLE_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-else:
-    st.error("Chybí API klíč v Secrets!")
+# 2. Načtení API klíče ze Secrets
+if "GOOGLE_API_KEY" not in st.secrets:
+    st.error("Chybí API klíč v nastavení Streamlitu (Secrets)!")
     st.stop()
 
-# 2. Nastavení modelu - POUŽÍVÁME NÁZEV Z VAŠÍ DIAGNOSTIKY
-# Vybral jsem 2.0-flash, který je ve vašem seznamu
-SYSTEM_PROMPT = "Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). Mluv česky a buď jako Jarvis."
+genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
-# Použijeme přesný název ze seznamu, který vaše API 'vidí'
+# 3. Inicializace modelu a paměti
+# Osobnost S.M.A.R.T.a
+SYSTEM_PROMPT = "Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). Mluv vždy česky, buď vysoce inteligentní, užitečný asistent jako Jarvis a uživateli říkej Pane."
+
 model = genai.GenerativeModel(
-    model_name="models/gemini-flash-latest", 
-    system_instruction="Jsi S.M.A.R.T., asistent jako Jarvis. Mluv česky a říkej mi Pane."
+    model_name="gemini-1.5-flash", 
+    system_instruction=SYSTEM_PROMPT
 )
 
-# 3. Chatovací historie
+# Inicializace historie zpráv v prohlížeči, pokud ještě neexistuje
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# 4. Zobrazení historie zpráv na obrazovce
 for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
+    with st.chat_message(msg["role"]):
+        st.write(msg["content"])
 
-# 4. Samotná komunikace
+# 5. Vstup od uživatele
 if prompt := st.chat_input("Vaše rozkazy, Pane?"):
+    # Přidání zprávy od uživatele do historie
     st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-    
+    with st.chat_message("user"):
+        st.write(prompt)
+
+    # 6. Generování odpovědi s ohledem na historii (PAMĚŤ)
     try:
-        response = model.generate_content(prompt)
+        # Přeformátování historie pro Google API
+        formatted_history = []
+        for m in st.session_state.messages[:-1]: # vezmeme vše kromě té poslední zprávy
+            role = "user" if m["role"] == "user" else "model"
+            formatted_history.append({"role": role, "parts": [m["content"]]})
+        
+        # Spuštění chatu s historií
+        chat_session = model.start_chat(history=formatted_history)
+        
+        with st.chat_message("assistant"):
+            with st.spinner("S.M.A.R.T. zpracovává data..."):
+                response = chat_session.send_message(prompt)
+                st.write(response.text)
+                
+        # Přidání odpovědi asistenta do historie
         st.session_state.messages.append({"role": "assistant", "content": response.text})
-        st.chat_message("assistant").write(response.text)
+
     except Exception as e:
-        st.error(f"Chyba: {e}")
-
-
+        st.error(f"S.M.A.R.T. Centrála hlásí chybu spojení: {e}")
