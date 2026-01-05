@@ -1,5 +1,5 @@
 import streamlit as st
-from shared import global_store  # Připojení ke společnému mozku
+from shared import global_store 
 from datetime import datetime
 
 st.set_page_config(page_title="S.M.A.R.T. Admin", layout="wide", page_icon="🛡️")
@@ -15,7 +15,6 @@ with st.sidebar:
     
     st.success("Přístup povolen, Pane.")
     
-    # Tlačítka pro rychlou správu
     if st.button("🔄 Obnovit data (Refresh)"):
         st.rerun()
     
@@ -26,13 +25,11 @@ with st.sidebar:
 
 st.title("🛡️ Centrála Operátora (Real-Time)")
 
-# Rozdělení obrazovky na dva sloupce
 col1, col2 = st.columns([1, 2])
 
 # --- LEVÝ SLOUPEC: STAV KLÍČŮ ---
 with col1:
     st.subheader("🔋 Stav energetických jader")
-    # Procházíme všech 10 klíčů a zjišťujeme stav z global_store
     for i in range(1, 11):
         status = global_store["key_status"].get(i, "✅ OK")
         color = "green" if status == "✅ OK" else "red"
@@ -43,17 +40,19 @@ with col1:
         st.success("Jádra byla restartována.")
         st.rerun()
 
-# --- PRAVÝ SLOUPEC: HISTORIE TŘÍDY ---
+# --- PRAVÝ SLOUPEC: MONITORING KOMUNIKACE ---
 with col2:
     st.subheader("🕵️ Monitoring komunikace")
     
     if global_store["logs"]:
-        # Zobrazíme zprávy od nejnovější po nejstarší
         for log in reversed(global_store["logs"]):
-            with st.expander(f"🕒 {log['time']} | Zpráva od uživatele"):
-                st.write(log['text'])
+            # Expander teď ukazuje čas a náhled otázky
+            with st.expander(f"🕒 {log['time']} | {log['user_text'][:40]}..."):
+                st.write("**Uživatel:**")
+                st.info(log['user_text'])
+                st.write("**S.M.A.R.T. Odpověď:**")
+                st.success(log['ai_text'])
     else:
         st.info("V síti nebyla zaznamenána žádná aktivita.")
 
-# --- AUTO REFRESH (UPOZORNĚNÍ) ---
 st.caption("Poznámka: Pro nejnovější data klikněte na 'Obnovit data' vlevo.")
