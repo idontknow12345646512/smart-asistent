@@ -22,18 +22,20 @@ for msg in st.session_state.messages:
 if prompt := st.chat_input("Zadejte příkaz..."):
     now = datetime.now().strftime("%H:%M:%S")
     
-    # 1. Monitoring pro admina
-    global_store["logs"].append({"time": now, "text": prompt})
+    # --- PŘÍPRAVA LOGU PRO ADMINA ---
+    # Vytvoříme záznam s dočasným textem pro AI
+    log_entry = {"time": now, "user_text": prompt, "ai_text": "Generování..."}
+    global_store["logs"].append(log_entry)
+    current_log_index = len(global_store["logs"]) - 1
     
-    # 2. Zobrazení uživateli
+    # Zobrazení uživateli
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
 
-    # --- TA NEJDŮLEŽITĚJŠÍ ČÁST: PŘÍPRAVA KONTEXTU ---
-    # Vytvoříme seznam zpráv tak, jak ho Gemini vyžaduje pro paměť
+    # --- PŘÍPRAVA KONTEXTU ---
     chat_context = []
-    for m in st.session_state.messages[:-1]: # Vezmeme všechny starší zprávy
+    for m in st.session_state.messages[:-1]:
         role = "user" if m["role"] == "user" else "model"
         chat_context.append({"role": role, "parts": [m["content"]]})
 
@@ -47,7 +49,6 @@ if prompt := st.chat_input("Zadejte příkaz..."):
             genai.configure(api_key=key)
             model = genai.GenerativeModel("models/gemini-2.5-flash-lite")
             
-            # TADY SE DĚJE TA MAGIE: Spustíme chat i s historií
             chat = model.start_chat(history=chat_context)
             res = chat.send_message(prompt)
             
@@ -56,6 +57,9 @@ if prompt := st.chat_input("Zadejte příkaz..."):
         except Exception as e:
             if "429" in str(e):
                 global_store["key_status"][key_id] = "❌ LIMIT"
+    
+    # --- AKTUALIZACE LOGU PRO ADMINA ---
+    global_store["logs"][current_log_index]["ai_text"] = response_text
     
     with st.chat_message("assistant"):
         st.write(response_text)
