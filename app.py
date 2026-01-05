@@ -13,17 +13,7 @@ api_keys = [
     st.secrets.get("GOOGLE_API_KEY_7"),
     st.secrets.get("GOOGLE_API_KEY_8"),
     st.secrets.get("GOOGLE_API_KEY_9"),
-    st.secrets.get("GOOGLE_API_KEY_10"),
-    st.secrets.get("GOOGLE_API_KEY_11"),
-    st.secrets.get("GOOGLE_API_KEY_12"),
-    st.secrets.get("GOOGLE_API_KEY_13"),
-    st.secrets.get("GOOGLE_API_KEY_14"),
-    st.secrets.get("GOOGLE_API_KEY_15"),
-    st.secrets.get("GOOGLE_API_KEY_16"),
-    st.secrets.get("GOOGLE_API_KEY_17"),
-    st.secrets.get("GOOGLE_API_KEY_18"),
-    st.secrets.get("GOOGLE_API_KEY_19"),
-    st.secrets.get("GOOGLE_API_KEY_20")
+    st.secrets.get("GOOGLE_API_KEY_10")
 ]
 # Odfiltrujeme prázdné klíče
 api_keys = [k for k in api_keys if k]
@@ -75,3 +65,4 @@ if prompt := st.chat_input("Vaše rozkazy, Pane?"):
             st.write(final_res)
     
     st.session_state.messages.append({"role": "assistant", "content": final_res})
+
