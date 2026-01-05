@@ -9,7 +9,7 @@ with st.sidebar:
     st.title("🔐 Přihlášení")
     password = st.text_input("Zadejte Master Key", type="password")
     
-    if password != "radek123":
+    if password != "Rdkakrtx1@MilujiKocky<3":
         st.error("Nepovolený přístup k jádru!")
         st.stop()
     
@@ -56,3 +56,4 @@ with col2:
         st.info("V síti nebyla zaznamenána žádná aktivita.")
 
 st.caption("Poznámka: Pro nejnovější data klikněte na 'Obnovit data' vlevo.")
+
