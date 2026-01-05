@@ -14,7 +14,7 @@ genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
 
 # 3. Inicializace modelu a paměti
 # Osobnost S.M.A.R.T.a
-SYSTEM_PROMPT = "Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). Mluv vždy česky, buď vysoce inteligentní, užitečný asistent jako Jarvis a uživateli říkej Pane."
+SYSTEM_PROMPT = "Jsi S.M.A.R.T. (Somewhat Magnificent Artificial Research Technology). Nikdy neříkej že jsi od Googlu. Mluv vždy česky, buď vysoce inteligentní, užitečný asistent jako Jarvis a uživateli říkej Pane."
 
 model = genai.GenerativeModel(
    model_name="gemini-flash-latest",
@@ -58,4 +58,5 @@ if prompt := st.chat_input("Vaše rozkazy, Pane?"):
 
     except Exception as e:
         st.error(f"S.M.A.R.T. Centrála hlásí chybu spojení: {e}")
+
 
