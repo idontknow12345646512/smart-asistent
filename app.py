@@ -5,28 +5,33 @@ from shared import global_store
 import urllib.parse
 import requests
 import random
+from io import BytesIO
+from PIL import Image
 
 # --- KONFIGURACE ---
 st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide")
 
-# --- FUNKCE PRO POLLINATIONS ---
+# --- FUNKCE PRO POLLINATIONS S VALIDACÍ ---
 def get_pollinations_image(prompt_text):
-    # Vytvoříme unikátní seed a ID, aby nás server neházel do jednoho pytle s celou školou
     seed = random.randint(1, 9999999)
-    # Zakódujeme prompt
     encoded_prompt = urllib.parse.quote(prompt_text)
     
-    # URL s parametry pro nejvyšší kvalitu a obejití limitů
-    # Používáme model 'flux' (aktuálně nejlepší na Pollinations)
+    # Používáme model 'flux' pro nejlepší kvalitu
     url = f"https://pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&seed={seed}&model=flux&nologo=true"
     
     try:
-        # Přidáme hlavičky, aby to vypadalo jako unikátní prohlížeč
         headers = {'User-Agent': f'SMART_OS_User_{seed}'}
         response = requests.get(url, timeout=30, headers=headers)
         
         if response.status_code == 200:
-            return response.content
+            # --- KLÍČOVÁ OPRAVA: Kontrola, zda jsou data skutečně obrázek ---
+            img_content = response.content
+            try:
+                img = Image.open(BytesIO(img_content))
+                img.verify() # Ověří, zda je soubor nepoškozený
+                return img_content
+            except Exception:
+                return None # Data nejsou validní obrázek (např. chybová hláška v textu)
     except:
         return None
     return None
@@ -34,7 +39,8 @@ def get_pollinations_image(prompt_text):
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Systém")
-    model_choice = st.radio("Jádro:", ["gemini-2.5-flash-lite", "gemini-3-flash"])
+    # Aktualizované názvy modelů
+    model_choice = st.radio("Jádro:", ["gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash-exp"])
     image_mode = st.toggle("Generátor obrazu 🎨")
     if st.button("🗑️ Reset"):
         st.session_state.messages = []
@@ -62,29 +68,31 @@ if prompt := st.chat_input("Zadejte příkaz..."):
     # Výběr funkčního klíče Gemini
     active_model = None
     for key in api_keys:
+        if not key: continue
         try:
             genai.configure(api_key=key)
             active_model = genai.GenerativeModel(model_choice)
+            # Zkušební volání (volitelné)
             break
         except:
             continue
 
     if not active_model:
-        st.error("🚨 Chyba: Žádné aktivní klíče.")
+        st.error("🚨 Chyba: Žádné aktivní klíče Gemini nebyly nalezeny.")
         st.stop()
 
     with st.chat_message("assistant"):
         if image_mode:
             status = st.empty()
-            status.info("🧠 Gemini vylepšuje zadání...")
+            status.info("🧠 Gemini vylepšuje zadání pro grafiku...")
             
-            # KROK 1: Gemini vytvoří profi anglický prompt
             try:
-                architect_msg = f"Create a detailed English image prompt for: {prompt}. Focus on art style, lighting and details. Output ONLY the English prompt."
-                eng_prompt = active_model.generate_content(architect_msg).text
+                # Gemini přeloží a vylepší prompt pro Pollinations
+                architect_msg = f"Create a short, detailed English image prompt for: {prompt}. Focus on lighting and art style. Output ONLY the English prompt."
+                response = active_model.generate_content(architect_msg)
+                eng_prompt = response.text
                 
-                status.info("🎨 Pollinations kreslí obraz...")
-                # KROK 2: Pollinations vygeneruje obrázek
+                status.info("🎨 Pollinations kreslí obraz (Flux jádro)...")
                 img_data = get_pollinations_image(eng_prompt)
                 
                 if img_data:
@@ -92,17 +100,21 @@ if prompt := st.chat_input("Zadejte příkaz..."):
                     st.image(img_data, use_container_width=True)
                     st.session_state.messages.append({
                         "role": "assistant", 
-                        "content": f"Vizuál hotov: {prompt}", 
+                        "content": f"Vizuál pro: {prompt}", 
                         "image_bytes": img_data
                     })
                 else:
-                    status.error("❌ Pollinations neodpovídá. Zkus to znovu za chvíli.")
+                    status.error("❌ Grafické jádro poslalo nečitelná data nebo je přetížené. Zkus to prosím znovu.")
             except Exception as e:
-                status.error(f"Chyba: {e}")
+                status.error(f"Chyba při generování: {e}")
         else:
             # Klasický chat
-            chat_hist = [{"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]} 
-                         for m in st.session_state.messages[:-1] if "content" in m]
+            chat_hist = []
+            for m in st.session_state.messages[:-1]:
+                if "content" in m:
+                    role = "user" if m["role"] == "user" else "model"
+                    chat_hist.append({"role": role, "parts": [m["content"]]})
+            
             try:
                 chat = active_model.start_chat(history=chat_hist)
                 response = chat.send_message(prompt)
@@ -110,4 +122,3 @@ if prompt := st.chat_input("Zadejte příkaz..."):
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
             except Exception as e:
                 st.error(f"Chyba Gemini: {e}")
-
