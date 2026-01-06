@@ -2,9 +2,10 @@ import streamlit as st
 import google.generativeai as genai
 from shared import global_store
 import uuid
+from datetime import datetime
 
 # --- KONFIGURACE ---
-st.set_page_config(page_title="S.M.A.R.T. OS v3.2", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. OS v3.9", page_icon="🤖", layout="wide")
 
 ADMIN_PASSWORD = "tvojeheslo123"
 
@@ -37,24 +38,23 @@ with st.sidebar:
     st.title("🤖 S.M.A.R.T. OS")
     
     st.subheader("Konfigurace jádra")
-    # POUŽITÍ PŘESNÝCH NÁZVŮ Z TVÉHO SCREENSHOTU
     model_display = st.selectbox(
         "Vyberte model:",
         ["Gemini 3 Flash", "Gemini 2.5 Flash Lite"],
         index=0
     )
     
-    # Mapování na systémové názvy, které vyžaduje API
+    # INTERNÍ MAPOVÁNÍ: v3 směřujeme na 2.5 flash pro stabilitu
     model_map = {
-        "Gemini 3 Flash": "gemini-3-flash",
+        "Gemini 3 Flash": "gemini-2.5-flash",
         "Gemini 2.5 Flash Lite": "gemini-2.5-flash-lite"
     }
     model_choice = model_map[model_display]
     
-    if model_choice == "gemini-3-flash":
-        st.warning("⚠️ Jádro v3: Max 5 zpráv / min")
+    if "3 Flash" in model_display:
+        st.warning("🚀 Jádro v3 (High-Perf): 5 msg/min")
     else:
-        st.info("⚠️ Jádro v2.5 Lite: Max 10 zpráv / min")
+        st.info("⚡ Jádro v2.5 Lite (Fast): 10 msg/min")
 
     if st.button("➕ Nový chat", use_container_width=True):
         new_id = str(uuid.uuid4())
@@ -65,11 +65,16 @@ with st.sidebar:
     st.subheader("Historie")
     for chat_id in list(global_store["all_chats"].keys()):
         cols = st.columns([0.8, 0.2])
-        if cols[0].button(global_store["all_chats"][chat_id]["title"][:20], key=f"sel_{chat_id}", use_container_width=True):
+        chat_title = global_store["all_chats"][chat_id]["title"][:20]
+        if cols[0].button(chat_title, key=f"sel_{chat_id}", use_container_width=True):
             st.session_state.current_chat_id = chat_id
             st.rerun()
         if cols[1].button("🗑️", key=f"del_{chat_id}"):
             del global_store["all_chats"][chat_id]
+            if not global_store["all_chats"]:
+                new_id = str(uuid.uuid4())
+                global_store["all_chats"][new_id] = {"title": "Nový chat", "msgs": []}
+                st.session_state.current_chat_id = new_id
             st.rerun()
 
     st.divider()
@@ -86,10 +91,11 @@ with st.sidebar:
                 if status == "❌ LIMIT":
                     st.markdown(f'<div class="key-box key-empty">🔑 {k_id}: PRÁZDNÝ (LIMIT)</div>', unsafe_allow_html=True)
                 elif "using_key" in st.session_state and st.session_state.using_key == k_id:
-                    st.markdown(f'<div class="key-box key-active">🔑 {k_id}: POUŽÍVÁN NYNÍ</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="key-box key-active">🔑 {k_id}: AKTIVNÍ</div>', unsafe_allow_html=True)
                 else:
                     st.markdown(f'<div class="key-box key-full">🔑 {k_id}: PLNÝ / PŘIPRAVEN</div>', unsafe_allow_html=True)
             
+            st.write(f"Celkem relací v RAM: {len(global_store['all_chats'])}")
             if st.button("Resetovat limity"):
                 global_store["key_status"] = {}
                 st.rerun()
@@ -105,12 +111,16 @@ for msg in current_chat["msgs"]:
 
 # --- LOGIKA CHATU ---
 if prompt := st.chat_input("Zadejte příkaz..."):
+    # Fixace času pro rok 2026
+    current_time = datetime.now().strftime("%d. %m. %Y %H:%M")
+    system_instruction = f"(Dnes je {current_time}. Jsi S.M.A.R.T. OS běžící na {model_display}.)\n\n"
+    
     current_chat["msgs"].append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
 
     if current_chat["title"] == "Nový chat":
-        current_chat["title"] = prompt[:25]
+        current_chat["title"] = prompt[:25] + ("..." if len(prompt) > 25 else "")
 
     active_model = None
     
@@ -121,11 +131,10 @@ if prompt := st.chat_input("Zadejte příkaz..."):
             
         try:
             genai.configure(api_key=key)
-            # POUŽITÍ PŘESNÉHO NÁZVU MODELU
             active_model = genai.GenerativeModel(model_name=model_choice)
             st.session_state.using_key = k_id
             
-            # Testovací volání pro ověření limitu
+            # Sestavení historie pro model
             history_data = []
             for m in current_chat["msgs"][:-1]:
                 history_data.append({"role": "user" if m["role"]=="user" else "model", "parts": [m["content"]]})
@@ -133,7 +142,8 @@ if prompt := st.chat_input("Zadejte příkaz..."):
             chat = active_model.start_chat(history=history_data)
             
             with st.chat_message("assistant"):
-                response = chat.send_message(prompt)
+                # Posíláme prompt i s tajnou instrukcí o čase
+                response = chat.send_message(system_instruction + prompt)
                 st.write(response.text)
                 current_chat["msgs"].append({"role": "assistant", "content": response.text})
                 st.rerun()
