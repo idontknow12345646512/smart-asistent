@@ -6,20 +6,21 @@ import urllib.parse
 import requests
 import random
 
+# --- KONFIGURACE ---
 st.set_page_config(page_title="S.M.A.R.T. Ultimate", page_icon="🤖", layout="wide")
 
-def fetch_img(url):
+# Funkce pro generování obrázku přes Hugging Face (profesionální API)
+def generate_hf_image(prompt_text):
+    # Model Stable Diffusion XL - velmi stabilní a kvalitní
+    API_URL = "https://api-inference.huggingface.co/models/stabilityai/stable-diffusion-xl-base-1.0"
+    # Token si vlož do Streamlit Secrets jako HF_TOKEN
+    headers = {"Authorization": f"Bearer {st.secrets.get('HF_TOKEN')}"}
+    
     try:
-        # Náhodný User-Agent pro obcházení limitů
-        agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Safari/537.36',
-            'Mozilla/5.0 (Linux; Android 10; SM-G960F) Chrome/110.0.0.0'
-        ]
-        headers = {'User-Agent': random.choice(agents)}
-        res = requests.get(url, timeout=25, headers=headers)
-        if res.status_code == 200 and 'image' in res.headers.get('content-type', ''):
-            return res.content
+        payload = {"inputs": prompt_text}
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=40)
+        if response.status_code == 200:
+            return response.content
     except:
         return None
     return None
@@ -27,17 +28,19 @@ def fetch_img(url):
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ S.M.A.R.T. Ovládání")
-    model_choice = st.radio("Jádro AI:", ["gemini-2.5-flash-lite", "gemini-1.5-pro"])
+    model_choice = st.radio("Jádro AI:", ["gemini-1.5-flash", "gemini-1.5-pro"])
     image_mode = st.toggle("Mód obrázků 🎨")
     if st.button("🗑️ Reset chatu"):
         st.session_state.messages = []
         st.rerun()
 
+# Načtení Google klíčů
 api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11) if st.secrets.get(f"GOOGLE_API_KEY_{i}")]
 
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
+# Zobrazení historie
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
@@ -50,50 +53,62 @@ if prompt := st.chat_input("Zadejte příkaz..."):
     with st.chat_message("user"):
         st.write(prompt)
 
+    # Najdeme funkční Gemini klíč pro překlad nebo chat
+    active_model = None
+    for i, key in enumerate(api_keys):
+        key_id = i + 1
+        if global_store.get("key_status", {}).get(key_id) == "❌ LIMIT": continue
+        try:
+            genai.configure(api_key=key)
+            active_model = genai.GenerativeModel(model_choice)
+            # Test funkčnosti klíče
+            break
+        except:
+            global_store["key_status"][key_id] = "❌ LIMIT"
+
     if image_mode:
         with st.chat_message("assistant"):
             p = st.empty()
-            encoded = urllib.parse.quote(prompt)
-            seed = random.randint(1, 999999)
+            p.info("🧠 Gemini vylepšuje zadání pro grafické jádro...")
             
-            # --- ZKOUŠÍME 3 RŮZNÁ JÁDRA ---
-            p.info("🛰️ Zkouším Jádro 1 (Turbo)...")
-            img = fetch_img(f"https://pollinations.ai/p/{encoded}?width=1024&height=1024&seed={seed}&model=turbo")
-            
-            if not img:
-                p.warning("🛰️ Jádro 1 selhalo. Zkouším Jádro 2 (Flux)...")
-                img = fetch_img(f"https://pollinations.ai/p/{encoded}?width=1024&height=1024&seed={seed}&model=flux")
-                
-            if not img:
-                p.warning("🛰️ Jádro 2 selhalo. Zkouším Jádro 3 (Záložní)...")
-                # Tento odkaz používá jinou cestu k serveru
-                img = fetch_img(f"https://image.pollinations.ai/prompt/{encoded}?seed={seed}&width=1024&height=1024&nologo=true")
+            # 1. KROK: Gemini přeloží a vylepší prompt (aby to nebylo jen "pes", ale profi popis)
+            try:
+                enhance_prompt = f"Rewrite this image prompt into a detailed, professional English artistic description for Stable Diffusion: {prompt}. Output ONLY the English description."
+                response = active_model.generate_content(enhance_prompt)
+                english_prompt = response.text
+            except:
+                english_prompt = prompt # Záloha, pokud Gemini selže
 
+            p.info("🎨 Stabilní jádro generuje obraz...")
+            
+            # 2. KROK: Hugging Face vygeneruje obrázek
+            img = generate_hf_image(english_prompt)
+            
             if img:
                 p.empty()
                 st.image(img, use_container_width=True)
-                st.session_state.messages.append({"role": "assistant", "content": f"Vizuál: {prompt}", "image_bytes": img})
+                st.session_state.messages.append({
+                    "role": "assistant", 
+                    "content": f"Vizuál vytvořen (SDXL). Zadání: {prompt}", 
+                    "image_bytes": img
+                })
             else:
-                p.error("❌ Všechny generátory jsou přetížené. Školní síť vás možná blokuje.")
+                p.error("❌ Grafické jádro je momentálně přetížené. Zkus to za chvíli.")
     
     else:
-        # Klasický textový chat s rotací klíčů
+        # KLASICKÝ CHAT
         chat_context = [{"role": "user" if m["role"] == "user" else "model", "parts": [m["content"]]} 
                         for m in st.session_state.messages[:-1] if "content" in m]
         
-        response_text = "❌ Offline."
-        for i, key in enumerate(api_keys):
-            key_id = i + 1
-            if global_store.get("key_status", {}).get(key_id) == "❌ LIMIT": continue
+        if active_model:
             try:
-                genai.configure(api_key=key)
-                model = genai.GenerativeModel(model_choice)
-                chat = model.start_chat(history=chat_context)
+                chat = active_model.start_chat(history=chat_context)
                 res = chat.send_message(prompt)
                 response_text = res.text
-                break 
             except Exception as e:
-                if "429" in str(e): global_store["key_status"][key_id] = "❌ LIMIT"
+                response_text = f"Chyba: {str(e)}"
+        else:
+            response_text = "❌ Žádný funkční API klíč nebyl nalezen."
 
         with st.chat_message("assistant"):
             st.write(response_text)
