@@ -2,8 +2,9 @@ import streamlit as st
 import google.generativeai as genai
 from datetime import datetime
 from shared import global_store 
+import urllib.parse  # Důležité pro opravu těch obrázků!
 
-# --- KONFIGURACE PRO MOBILY A PC ---
+# --- KONFIGURACE ---
 st.set_page_config(
     page_title="S.M.A.R.T. App",
     page_icon="🤖",
@@ -11,34 +12,19 @@ st.set_page_config(
     initial_sidebar_state="collapsed"
 )
 
-# Vylepšení vzhledu bublin a tlačítek pro dotykové displeje
 st.markdown("""
     <style>
     .stChatMessage { font-size: 1.1rem !important; border-radius: 15px !important; }
-    .stChatInputContainer { padding-bottom: 20px !important; }
-    @media (max-width: 600px) {
-        .stTitle { font-size: 2rem !important; }
-    }
+    @media (max-width: 600px) { .stTitle { font-size: 2rem !important; } }
     </style>
     """, unsafe_allow_html=True)
 
-# --- SIDEBAR: PŘEPÍNÁNÍ ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Systém")
-    
-    # Přepínání modelů
-    model_choice = st.radio(
-        "Zvolit procesor:",
-        ["gemini-2.5-flash-lite", "gemini-1.5-pro"],
-        help="Flash je pro rychlý chat, Pro pro těžké úkoly."
-    )
-    
+    model_choice = st.radio("Procesor:", ["gemini-2.5-flash-lite", "gemini-1.5-pro"])
     st.divider()
-    
-    # Nastavení obrázků
-    st.subheader("Vizuální modul")
     image_mode = st.toggle("Mód generování obrázků 🎨")
-    
     if st.button("🗑️ Vyčistit paměť"):
         st.session_state.messages = []
         st.rerun()
@@ -51,13 +37,11 @@ st.title("🤖 S.M.A.R.T. Terminál")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Zobrazení chatu
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
         if "image_url" in msg:
-            # use_container_width zajistí, že se obrázek přizpůsobí mobilu i PC
-            st.image(msg["image_url"], caption="Vygenerováno modulem S.M.A.R.T.", use_container_width=True)
+            st.image(msg["image_url"], use_container_width=True)
 
 # --- LOGIKA VSTUPU ---
 if prompt := st.chat_input("Zadejte příkaz..."):
@@ -67,18 +51,16 @@ if prompt := st.chat_input("Zadejte příkaz..."):
     with st.chat_message("user"):
         st.write(prompt)
 
-    # Logování pro admina
     log_entry = {"time": now, "user_text": prompt, "ai_text": "Zpracovávám..."}
     global_store["logs"].append(log_entry)
     current_log_index = len(global_store["logs"]) - 1
 
-    # --- REŽIM OBRÁZKŮ ---
     if image_mode:
-        # Vytvoření unikátního URL pro obrázek
-        # Přidáváme náhodné číslo (seed), aby se při stejném textu mohl vytvořit jiný obrázek
+        # --- OPRAVA OBRÁZKŮ (Kódování textu) ---
         seed = datetime.now().microsecond
-        clean_prompt = prompt.replace(" ", "_")
-        image_url = f"https://pollinations.ai/p/{clean_prompt}?width=1024&height=1024&seed={seed}"
+        # Tohle převede "Černý mustang" na formát, který funguje v URL:
+        encoded_prompt = urllib.parse.quote(prompt)
+        image_url = f"https://pollinations.ai/p/{encoded_prompt}?width=1024&height=1024&seed={seed}&model=flux"
         
         response_text = f"🎨 Generuji vizualizaci pro: **{prompt}**"
         
@@ -89,21 +71,19 @@ if prompt := st.chat_input("Zadejte příkaz..."):
         st.session_state.messages.append({"role": "assistant", "content": response_text, "image_url": image_url})
         global_store["logs"][current_log_index]["ai_text"] = "[OBRÁZEK]"
     
-    # --- REŽIM TEXTU ---
     else:
+        # TEXTOVÝ CHAT
         chat_context = []
         for m in st.session_state.messages[:-1]:
             role = "user" if m["role"] == "user" else "model"
             if "content" in m:
                 chat_context.append({"role": role, "parts": [m["content"]]})
 
-        response_text = "⚠️ Všechna jádra offline. Zkontroluj limity."
+        response_text = "⚠️ Jádra offline."
         
         for i, key in enumerate(api_keys):
             key_id = i + 1
-            if global_store["key_status"].get(key_id) == "❌ LIMIT":
-                continue
-            
+            if global_store["key_status"].get(key_id) == "❌ LIMIT": continue
             try:
                 genai.configure(api_key=key)
                 model = genai.GenerativeModel(model_choice)
@@ -112,11 +92,9 @@ if prompt := st.chat_input("Zadejte příkaz..."):
                 response_text = res.text
                 break 
             except Exception as e:
-                if "429" in str(e):
-                    global_store["key_status"][key_id] = "❌ LIMIT"
+                if "429" in str(e): global_store["key_status"][key_id] = "❌ LIMIT"
 
         with st.chat_message("assistant"):
             st.write(response_text)
-        
         st.session_state.messages.append({"role": "assistant", "content": response_text})
         global_store["logs"][current_log_index]["ai_text"] = response_text
