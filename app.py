@@ -9,9 +9,12 @@ st.set_page_config(page_title="S.M.A.R.T. Voice & Image", page_icon="🎙️")
 
 # --- FUNKCE: AI MLUVÍ ČESKY ---
 def speak_text(text):
+    # Ošetření textu pro JavaScript (odstranění uvozovek a zalomení řádků)
+    safe_text = text.replace("'", "").replace('"', "").replace("\n", " ")
     js_code = f"""
         <script>
-        var msg = new SpeechSynthesisUtterance('{text.replace("'", "").replace("\\n", " ")}');
+        window.speechSynthesis.cancel(); // Zastaví předchozí mluvení, pokud ještě běží
+        var msg = new SpeechSynthesisUtterance('{safe_text}');
         msg.lang = 'cs-CZ'; 
         msg.rate = 1.0; 
         window.speechSynthesis.speak(msg);
@@ -19,7 +22,7 @@ def speak_text(text):
     """
     components.html(js_code, height=0)
 
-# --- SIDEBAR (NASTAVENÍ) ---
+# --- SIDEBAR ---
 with st.sidebar:
     st.title("⚙️ Systém S.M.A.R.T.")
     voice_enabled = st.toggle("Hlasová odpověď AI 🔊", value=True)
@@ -27,7 +30,6 @@ with st.sidebar:
     model_choice = st.selectbox("Model AI:", ["gemini-2.5-flash-lite", "gemini-1.5-pro"])
     st.divider()
     st.write("🎤 **Mluv na S.M.A.R.T.a:**")
-    # Mikrofonní vstup
     audio_input = mic_recorder(start_prompt="Nahrávat hlas 🎙️", stop_prompt="Odeslat ⚡", key='mic')
 
 # Načtení klíčů
@@ -38,17 +40,19 @@ st.title("🤖 S.M.A.R.T. Terminál")
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Zobrazení historie
 for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.write(msg["content"])
         if "image_url" in msg:
             st.image(msg["image_url"])
 
-# --- ZPRACOVÁNÍ VSTUPU ---
+# --- BEZPEČNÉ ZPRACOVÁNÍ VSTUPU ---
 input_text = st.chat_input("Napiš nebo použij mikrofon...")
-if audio_input and audio_input['text']:
-    input_text = audio_input['text']
+
+# Oprava KeyError: Kontrola, zda audio_input existuje a obsahuje klíč 'text'
+if audio_input is not None:
+    if isinstance(audio_input, dict) and audio_input.get('text'):
+        input_text = audio_input['text']
 
 if input_text:
     now = datetime.now().strftime("%H:%M:%S")
@@ -62,26 +66,24 @@ if input_text:
     current_log_index = len(global_store["logs"]) - 1
 
     if image_mode:
-        # LOGIKA OBRÁZKŮ
         image_url = f"https://pollinations.ai/p/{input_text.replace(' ', '_')}?width=1024&height=1024&seed=42"
         response_text = f"Generuji obrázek pro: {input_text}"
         with st.chat_message("assistant"):
             st.write(response_text)
             st.image(image_url)
         st.session_state.messages.append({"role": "assistant", "content": response_text, "image_url": image_url})
-        global_store["logs"][current_log_index]["ai_text"] = "[Vygenerován obrázek]"
+        global_store["logs"][current_log_index]["ai_text"] = "[Obrázek]"
         if voice_enabled:
-            speak_text("Obrázek je připraven, Pane.")
+            speak_text("Obrázek je hotový.")
     
     else:
-        # LOGIKA CHATU S PAMĚTÍ
         chat_context = []
         for m in st.session_state.messages[:-1]:
             role = "user" if m["role"] == "user" else "model"
             if "content" in m:
                 chat_context.append({"role": role, "parts": [m["content"]]})
 
-        response_text = "Systémová chyba: Jádra offline."
+        response_text = "Všechna jádra offline."
         for i, key in enumerate(api_keys):
             key_id = i + 1
             if global_store["key_status"].get(key_id) == "❌ LIMIT": continue
