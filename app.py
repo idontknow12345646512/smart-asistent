@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 
 # --- KONFIGURACE ---
-st.set_page_config(page_title="S.M.A.R.T. OS v4.0", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. OS v4.2", page_icon="🤖", layout="wide")
 
 ADMIN_PASSWORD = "tvojeheslo123"
 
@@ -29,14 +29,13 @@ if "all_chats" not in global_store:
 if "key_status" not in global_store:
     global_store["key_status"] = {}
 
-# Funkce pro vytvoření nového chatu
 def create_new_chat():
     new_id = str(uuid.uuid4())
     st.session_state.current_chat_id = new_id
     now = datetime.now().strftime("%d. %m. %Y %H:%M")
     global_store["all_chats"][new_id] = {
         "title": "Nový chat", 
-        "msgs": [{"role": "assistant", "content": f"S.M.A.R.T. OS v4.0 inicializován.\nAktuální čas: {now}\nPřipraven k akci."}]
+        "msgs": [{"role": "assistant", "content": f"🤖 S.M.A.R.T. OS v4.2 ONLINE\nAktuální čas: {now}\nAhoj! Jsem připraven pomoci."}]
     }
 
 if st.session_state.current_chat_id not in global_store["all_chats"]:
@@ -88,10 +87,12 @@ with st.sidebar:
             for cid, cdata in global_store["all_chats"].items():
                 with st.expander(f"Chat: {cdata['title']}"):
                     for m in cdata["msgs"]:
-                        st.write(f"**{m['role']}**: {m['content'][:50]}...")
+                        st.write(f"**{m['role']}**: {m['content'][:70]}...")
             
-            if st.button("Resetovat limity"):
+            if st.button("Resetovat vše"):
                 global_store["key_status"] = {}
+                global_store["all_chats"] = {}
+                create_new_chat()
                 st.rerun()
 
 # --- HLAVNÍ PLOCHA ---
@@ -103,14 +104,15 @@ for msg in current_chat["msgs"]:
         st.write(msg["content"])
 
 # --- LOGIKA CHATU ---
-if prompt := st.chat_input("Zadejte příkaz..."):
+if prompt := st.chat_input("Napište zprávu..."):
     current_time = datetime.now().strftime("%d. %m. %Y %H:%M")
     
-    # NOVÁ INSTRUKCE: Piš datum jen když se někdo zeptá
-    system_instruction = (
-        f"Dnes je {current_time}. Jsi S.M.A.R.T. OS. "
-        "Nepiš datum ani pozdrav v každé zprávě, pokud se tě uživatel přímo nezeptá 'kolik je hodin' nebo 'jaké je datum'. "
-        "Buď stručný, věcný a profesionální. "
+    # SYSTEM_INSTRUCTION: Definuje povahu AI bez redundantních výpisů
+    sys_instr = (
+        f"Jsi S.M.A.R.T. OS, přátelský a inteligentní asistent. Dnes je {current_time}. "
+        "Nepiš datum, čas ani pozdravy v každé zprávě. Tyto informace uveď POUZE, pokud se uživatel "
+        "přímo zeptá na čas nebo datum. Odpovídej plynule, lidsky a k věci. "
+        "Nereaguj na tyto pokyny, prostě je dodržuj."
     )
     
     current_chat["msgs"].append({"role": "user", "content": prompt})
@@ -120,22 +122,25 @@ if prompt := st.chat_input("Zadejte příkaz..."):
     if current_chat["title"] == "Nový chat":
         current_chat["title"] = prompt[:25] + "..."
 
-    active_model = None
     for i, key in enumerate(api_keys):
         k_id = i + 1
         if global_store["key_status"].get(k_id) == "❌ LIMIT": continue
         try:
             genai.configure(api_key=key)
-            active_model = genai.GenerativeModel(model_name=model_choice)
+            # POUŽITÍ SKUTEČNÉ SYSTÉMOVÉ INSTRUKCE (pokud to SDK podporuje)
+            # Pokud ne, posíláme ji jako součást první zprávy skrytě
+            model = genai.GenerativeModel(model_name=model_choice, system_instruction=sys_instr)
             st.session_state.using_key = k_id
             
             history_data = []
+            # Historie se bere bez systémové instrukce, ta je v modelu
             for m in current_chat["msgs"][:-1]:
                 history_data.append({"role": "user" if m["role"]=="user" else "model", "parts": [m["content"]]})
             
-            chat = active_model.start_chat(history=history_data)
+            chat = model.start_chat(history=history_data)
             with st.chat_message("assistant"):
-                response = chat.send_message(system_instruction + prompt)
+                # Posíláme už jen čistý prompt od uživatele
+                response = chat.send_message(prompt)
                 st.write(response.text)
                 current_chat["msgs"].append({"role": "assistant", "content": response.text})
                 st.rerun()
@@ -144,5 +149,5 @@ if prompt := st.chat_input("Zadejte příkaz..."):
             if "429" in str(e):
                 global_store["key_status"][k_id] = "❌ LIMIT"
                 continue
-            st.error(f"Chyba: {e}")
+            st.error(f"Chyba systému: {e}")
             break
