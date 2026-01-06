@@ -34,7 +34,7 @@ def get_pollinations_image(prompt_text):
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Systém")
-    model_choice = st.radio("Jádro:", ["gemini-1.5-flash", "gemini-1.5-pro"])
+    model_choice = st.radio("Jádro:", ["gemini-2.5-flash-lite", "gemini-3-flash"])
     image_mode = st.toggle("Generátor obrazu 🎨")
     if st.button("🗑️ Reset"):
         st.session_state.messages = []
@@ -110,3 +110,4 @@ if prompt := st.chat_input("Zadejte příkaz..."):
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
             except Exception as e:
                 st.error(f"Chyba Gemini: {e}")
+
