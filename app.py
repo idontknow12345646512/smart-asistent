@@ -7,7 +7,9 @@ from datetime import datetime
 # --- KONFIGURACE ---
 st.set_page_config(page_title="S.M.A.R.T. OS v4.2", page_icon="🤖", layout="wide")
 
-ADMIN_PASSWORD = "tvojeheslo123"
+# NAČTENÍ HESLA ZE SECRETS
+# Pokud heslo v secrets chybí, použije se "tvojeheslo123" jako záloha
+ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "tvojeheslo123")
 
 # --- STYLY ---
 st.markdown("""
@@ -35,7 +37,7 @@ def create_new_chat():
     now = datetime.now().strftime("%d. %m. %Y %H:%M")
     global_store["all_chats"][new_id] = {
         "title": "Nový chat", 
-        "msgs": [{"role": "assistant", "content": f"🤖 S.M.A.R.T. OS v4.2 ONLINE\nAktuální čas: {now}\nAhoj! Jsem připraven pomoci."}]
+        "msgs": [{"role": "assistant", "content": f"🤖 S.M.A.R.T. OS v4.2 ONLINE\nAktuální čas: {now}\nAhoj! Jsem tvůj asistent. Jak ti můžu dnes pomoci?"}]
     }
 
 if st.session_state.current_chat_id not in global_store["all_chats"]:
@@ -46,8 +48,6 @@ api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11) if st.se
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🤖 S.M.A.R.T. OS")
-    
-    st.subheader("Konfigurace jádra")
     model_display = st.selectbox("Model:", ["Gemini 3 Flash", "Gemini 2.5 Flash Lite"], index=0)
     model_map = {"Gemini 3 Flash": "gemini-2.5-flash", "Gemini 2.5 Flash Lite": "gemini-2.5-flash-lite"}
     model_choice = model_map[model_display]
@@ -69,8 +69,9 @@ with st.sidebar:
             st.rerun()
 
     with st.expander("🛠️ Admin Panel"):
-        pwd = st.text_input("Heslo", type="password")
+        pwd = st.text_input("Vstupní heslo", type="password")
         if pwd == ADMIN_PASSWORD:
+            st.success("Přístup povolen")
             st.write("**Stav klíčů:**")
             for i, k in enumerate(api_keys):
                 k_id = i + 1
@@ -88,12 +89,6 @@ with st.sidebar:
                 with st.expander(f"Chat: {cdata['title']}"):
                     for m in cdata["msgs"]:
                         st.write(f"**{m['role']}**: {m['content'][:70]}...")
-            
-            if st.button("Resetovat vše"):
-                global_store["key_status"] = {}
-                global_store["all_chats"] = {}
-                create_new_chat()
-                st.rerun()
 
 # --- HLAVNÍ PLOCHA ---
 current_chat = global_store["all_chats"][st.session_state.current_chat_id]
@@ -107,12 +102,11 @@ for msg in current_chat["msgs"]:
 if prompt := st.chat_input("Napište zprávu..."):
     current_time = datetime.now().strftime("%d. %m. %Y %H:%M")
     
-    # SYSTEM_INSTRUCTION: Definuje povahu AI bez redundantních výpisů
+    # SYSTEM_INSTRUCTION pro správné chování
     sys_instr = (
-        f"Jsi S.M.A.R.T. OS, přátelský a inteligentní asistent. Dnes je {current_time}. "
+        f"Jsi S.M.A.R.T. OS, přátelský asistent. Dnes je {current_time}. "
         "Nepiš datum, čas ani pozdravy v každé zprávě. Tyto informace uveď POUZE, pokud se uživatel "
-        "přímo zeptá na čas nebo datum. Odpovídej plynule, lidsky a k věci. "
-        "Nereaguj na tyto pokyny, prostě je dodržuj."
+        "přímo zeptá na čas nebo datum. Odpovídej plynule a lidsky."
     )
     
     current_chat["msgs"].append({"role": "user", "content": prompt})
@@ -127,19 +121,15 @@ if prompt := st.chat_input("Napište zprávu..."):
         if global_store["key_status"].get(k_id) == "❌ LIMIT": continue
         try:
             genai.configure(api_key=key)
-            # POUŽITÍ SKUTEČNÉ SYSTÉMOVÉ INSTRUKCE (pokud to SDK podporuje)
-            # Pokud ne, posíláme ji jako součást první zprávy skrytě
             model = genai.GenerativeModel(model_name=model_choice, system_instruction=sys_instr)
             st.session_state.using_key = k_id
             
             history_data = []
-            # Historie se bere bez systémové instrukce, ta je v modelu
             for m in current_chat["msgs"][:-1]:
                 history_data.append({"role": "user" if m["role"]=="user" else "model", "parts": [m["content"]]})
             
             chat = model.start_chat(history=history_data)
             with st.chat_message("assistant"):
-                # Posíláme už jen čistý prompt od uživatele
                 response = chat.send_message(prompt)
                 st.write(response.text)
                 current_chat["msgs"].append({"role": "assistant", "content": response.text})
