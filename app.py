@@ -6,17 +6,17 @@ import pandas as pd
 from datetime import datetime
 import extra_streamlit_components as stx
 
-# --- 1. KONFIGURACE A STYL ---
+# --- 1. KONFIGURACE A STYLY ---
 st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide")
 
 st.markdown("""
     <style>
-    /* Skrytí systémových prvků Streamlitu (Running hlášky, Deploy tlačítko) */
+    /* Skrytí systémových hlášek Streamlitu (Running..., Deploy, atd.) */
     [data-testid="stStatusWidget"], .stDeployButton, footer {
         display: none !important;
     }
 
-    /* Modrý obdélník pro přemýšlení */
+    /* Modrý box pro indikaci přemýšlení */
     .thinking-box {
         background-color: #e1f5fe;
         border-left: 5px solid #0288d1;
@@ -27,7 +27,7 @@ st.markdown("""
         margin: 10px 0;
     }
 
-    /* Fixní patička */
+    /* Fixní patička pro verzi a info */
     .footer {
         position: fixed; left: 0; bottom: 0; width: 100%;
         text-align: center; color: gray; font-size: 0.75rem;
@@ -36,13 +36,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. COOKIES (IDENTIFIKACE ZAŘÍZENÍ) ---
+# --- 2. COOKIE MANAGER (PAMĚŤ ZAŘÍZENÍ) ---
 def get_manager():
     return stx.CookieManager()
 
 cookie_manager = get_manager()
 device_id = cookie_manager.get(cookie="smart_os_device_id")
 
+# Pokud zařízení nemá ID, vytvoříme ho a uložíme na rok
 if not device_id:
     if "temp_id" not in st.session_state:
         st.session_state.temp_id = str(uuid.uuid4())[:8]
@@ -71,10 +72,10 @@ total_used = stats_df['used'].astype(int).sum() if not stats_df.empty else 0
 is_lite_mode = total_used >= 200
 user_history = users_df[users_df['user_id'] == st.session_state.device_id]
 
-# --- 4. SIDEBAR (HISTORIE) ---
+# --- 4. SIDEBAR (HISTORIE CHATŮ) ---
 with st.sidebar:
     st.title("🤖 S.M.A.R.T. OS")
-    st.info(f"ID: {st.session_state.device_id}")
+    st.info(f"ID zařízení: {st.session_state.device_id}")
     
     if st.button("➕ Nový chat", use_container_width=True):
         st.session_state.current_chat_id = str(uuid.uuid4())
@@ -87,31 +88,33 @@ with st.sidebar:
             st.session_state.current_chat_id = row['chat_id']
             st.rerun()
 
-# --- 5. CHAT ROZHRANÍ ---
+# --- 5. CHAT PLOCHA ---
 current_msgs = user_history[user_history['chat_id'] == st.session_state.current_chat_id]
 chat_title = current_msgs['title'].iloc[0] if not current_msgs.empty else "Nový chat"
 st.header(f"💬 {chat_title}")
 
+# Zobrazení historie aktuálního chatu
 for _, m in current_msgs.iterrows():
     with st.chat_message(m['role']):
         st.write(m['content'])
 
-# --- 6. LOGIKA ODPOVĚDI (STREAMING + POJISTKA) ---
+# --- 6. LOGIKA ODPOVĚDI (STREAMING + POJISTKA PROTI DUPLICITÁM) ---
 if prompt := st.chat_input("Napište zprávu..."):
+    # Pojistka: AI odpovídá jen pokud už proces neběží
     if "processing" not in st.session_state:
         st.session_state.processing = True
         
         with st.chat_message("user"):
             st.write(prompt)
         
-        # Modrý obdélník pro přemýšlení
+        # Zobrazení modrého boxu místo systémových hlášek
         thinking_placeholder = st.empty()
         thinking_placeholder.markdown('<div class="thinking-box">🤖 SMART přemýšlí . . .</div>', unsafe_allow_html=True)
         
         new_title = chat_title if chat_title != "Nový chat" else prompt[:20]
         now = datetime.now().strftime("%d.%m.%Y %H:%M")
         
-        # Uložení zprávy uživatele do databáze
+        # Uložení zprávy uživatele do GSheets
         user_row = pd.DataFrame([{
             "user_id": st.session_state.device_id, 
             "chat_id": st.session_state.current_chat_id, 
@@ -122,7 +125,7 @@ if prompt := st.chat_input("Napište zprávu..."):
         }])
         conn.update(worksheet="Users", data=pd.concat([users_df, user_row], ignore_index=True))
 
-        # Konfigurace Gemini
+        # Rotace API klíčů a generování odpovědi
         api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
         model_name = "gemini-2.5-flash" if not is_lite_mode else "gemini-2.5-flash-lite"
         
@@ -133,7 +136,7 @@ if prompt := st.chat_input("Napište zprávu..."):
                 genai.configure(api_key=key)
                 model = genai.GenerativeModel(model_name=model_name)
                 
-                # Příprava historie zpráv
+                # Sestavení historie pro model
                 history_data = []
                 for _, m in current_msgs.iterrows():
                     history_data.append({"role": "user" if m['role'] == "user" else "model", "parts": [m['content']]})
@@ -141,7 +144,7 @@ if prompt := st.chat_input("Napište zprávu..."):
                 chat = model.start_chat(history=history_data)
                 response_stream = chat.send_message(prompt, stream=True)
                 
-                # Jakmile dorazí první data, smažeme modrý box
+                # Jakmile dorazí první kousek textu, smažeme modrý box
                 thinking_placeholder.empty()
                 
                 with st.chat_message("assistant"):
@@ -149,7 +152,7 @@ if prompt := st.chat_input("Napište zprávu..."):
                         for chunk in response_stream:
                             yield chunk.text
                     
-                    # PLYNULÉ PSANÍ (STREAMING)
+                    # Efekt plynulého psaní
                     full_response = st.write_stream(stream_generator())
                     
                     # Uložení odpovědi AI
@@ -162,11 +165,11 @@ if prompt := st.chat_input("Napište zprávu..."):
                         "timestamp": now
                     }])
                     
-                    # Načtení čerstvých dat pro aktualizaci
+                    # Aktualizace GSheets
                     fresh_u, fresh_s = load_db()
                     conn.update(worksheet="Users", data=pd.concat([fresh_u, ai_row], ignore_index=True))
                     
-                    # Aktualizace statistik využití klíče
+                    # Statistiky využití klíče
                     k_id = str(i + 1)
                     if k_id not in fresh_s['key_id'].astype(str).values:
                         new_s = pd.DataFrame([{"key_id": k_id, "used": 1}])
@@ -175,7 +178,7 @@ if prompt := st.chat_input("Napište zprávu..."):
                         fresh_s.loc[fresh_s['key_id'].astype(str) == k_id, 'used'] += 1
                     conn.update(worksheet="Stats", data=fresh_s)
                     
-                    # Uvolnění pojistky a refresh
+                    # Ukončení procesu a refresh stránky pro čistý stav
                     del st.session_state.processing
                     st.rerun()
                 
@@ -187,7 +190,7 @@ if prompt := st.chat_input("Napište zprávu..."):
         if not success:
             thinking_placeholder.empty()
             del st.session_state.processing
-            st.error("Chyba spojení. Zkontrolujte prosím API klíče nebo dostupnost modelů.")
+            st.error("Omlouvám se, spojení se S.M.A.R.T. jádrem selhalo. Zkuste to prosím za chvíli.")
 
-# --- 7. PATIČKA ---
-st.markdown('<div class="footer">S.M.A.R.T. OS může dělat chyby.</div>', unsafe_allow_html=True)
+# Patička
+st.markdown('<div class="footer">S.M.A.R.T. OS v7.8 | 2026</div>', unsafe_allow_html=True)
