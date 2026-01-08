@@ -1,14 +1,17 @@
 import streamlit as st
 import google.generativeai as genai
-from shared import global_store
+from streamlit_gsheets import GSheetsConnection
 import uuid
+import pandas as pd
 from datetime import datetime
 
 # --- KONFIGURACE ---
-st.set_page_config(page_title="S.M.A.R.T. OS v4.2", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. OS v5.0", page_icon="🤖", layout="wide")
 
-# NAČTENÍ HESLA ZE SECRETS
-# Pokud heslo v secrets chybí, použije se "tvojeheslo123" jako záloha
+# Připojení ke Google Sheets
+conn = st.connection("gsheets", type=GSheetsConnection)
+
+# Načtení hesla ze secrets
 ADMIN_PASSWORD = st.secrets.get("ADMIN_PASSWORD", "tvojeheslo123")
 
 # --- STYLY ---
@@ -16,128 +19,117 @@ st.markdown("""
     <style>
     .stChatMessage { border-radius: 12px; }
     .stSidebar { background-color: #111b21; }
-    .key-box { padding: 10px; border-radius: 5px; margin: 5px 0; border: 1px solid #444; font-size: 0.8rem; }
-    .key-full { background-color: #155724; color: #d4edda; }
-    .key-empty { background-color: #721c24; color: #f8d7da; }
-    .key-active { background-color: #0c5460; color: #d1ecf1; border: 2px solid #fff; }
     </style>
     """, unsafe_allow_html=True)
 
+# --- FUNKCE PRO DATABÁZI (Google Sheets) ---
+def load_data():
+    try:
+        # Načte listy "Users" (zprávy) a "Stats" (využití klíčů)
+        users_df = conn.read(worksheet="Users", ttl=0)
+        stats_df = conn.read(worksheet="Stats", ttl=0)
+        return users_df, stats_df
+    except:
+        return pd.DataFrame(columns=["user_id", "chat_id", "title", "role", "content", "timestamp"]), pd.DataFrame(columns=["key_id", "used"])
+
+def save_message(user_id, chat_id, title, role, content):
+    users_df, _ = load_data()
+    now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    new_row = pd.DataFrame([{
+        "user_id": user_id, "chat_id": chat_id, "title": title,
+        "role": role, "content": content, "timestamp": now
+    }])
+    updated_df = pd.concat([users_df, new_row], ignore_index=True)
+    conn.update(worksheet="Users", data=updated_df)
+
+def update_key_usage(k_id):
+    users_df, stats_df = load_data()
+    k_id_str = str(k_id)
+    # Pokud klíč v tabulce neexistuje, vytvoříme ho
+    if k_id_str not in stats_df['key_id'].astype(str).values:
+        new_stat = pd.DataFrame([{"key_id": k_id_str, "used": 1}])
+        stats_df = pd.concat([stats_df, new_stat], ignore_index=True)
+    else:
+        stats_df.loc[stats_df['key_id'].astype(str) == k_id_str, 'used'] += 1
+    conn.update(worksheet="Stats", data=stats_df)
+
 # --- INICIALIZACE ---
+if "user_id" not in st.session_state:
+    st.session_state.user_id = str(uuid.uuid4())[:8]
+
 if "current_chat_id" not in st.session_state:
     st.session_state.current_chat_id = str(uuid.uuid4())
-if "all_chats" not in global_store:
-    global_store["all_chats"] = {}
-if "key_status" not in global_store:
-    global_store["key_status"] = {}
 
-def create_new_chat():
-    new_id = str(uuid.uuid4())
-    st.session_state.current_chat_id = new_id
-    now = datetime.now().strftime("%d. %m. %Y %H:%M")
-    global_store["all_chats"][new_id] = {
-        "title": "Nový chat", 
-        "msgs": [{"role": "assistant", "content": f"🤖 S.M.A.R.T. OS v4.2 ONLINE\nAktuální čas: {now}\nAhoj! Jsem tvůj asistent. Jak ti můžu dnes pomoci?"}]
-    }
+users_df, stats_df = load_data()
+# Filtrujeme zprávy jen pro tohoto uživatele
+user_history = users_df[users_df['user_id'] == st.session_state.user_id]
 
-if st.session_state.current_chat_id not in global_store["all_chats"]:
-    create_new_chat()
-
-api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11) if st.secrets.get(f"GOOGLE_API_KEY_{i}")]
-
-# --- SIDEBAR ---
+# --- SIDEBAR (Čistý pro uživatele) ---
 with st.sidebar:
     st.title("🤖 S.M.A.R.T. OS")
-    model_display = st.selectbox("Model:", ["Gemini 3 Flash", "Gemini 2.5 Flash Lite"], index=0)
-    model_map = {"Gemini 3 Flash": "gemini-2.5-flash", "Gemini 2.5 Flash Lite": "gemini-2.5-flash-lite"}
-    model_choice = model_map[model_display]
+    st.caption(f"ID uživatele: {st.session_state.user_id}")
     
     if st.button("➕ Nový chat", use_container_width=True):
-        create_new_chat()
+        st.session_state.current_chat_id = str(uuid.uuid4())
         st.rerun()
 
     st.subheader("Historie")
-    for chat_id in list(global_store["all_chats"].keys()):
-        cols = st.columns([0.8, 0.2])
-        title = global_store["all_chats"][chat_id]["title"][:20]
-        if cols[0].button(title, key=f"sel_{chat_id}", use_container_width=True):
-            st.session_state.current_chat_id = chat_id
+    unique_chats = user_history[['chat_id', 'title']].drop_duplicates()
+    for _, row in unique_chats.iterrows():
+        if st.button(row['title'][:20], key=f"btn_{row['chat_id']}", use_container_width=True):
+            st.session_state.current_chat_id = row['chat_id']
             st.rerun()
-        if cols[1].button("🗑️", key=f"del_{chat_id}"):
-            del global_store["all_chats"][chat_id]
-            if not global_store["all_chats"]: create_new_chat()
-            st.rerun()
-
-    with st.expander("🛠️ Admin Panel"):
-        pwd = st.text_input("Vstupní heslo", type="password")
-        if pwd == ADMIN_PASSWORD:
-            st.success("Přístup povolen")
-            st.write("**Stav klíčů:**")
-            for i, k in enumerate(api_keys):
-                k_id = i + 1
-                status = global_store["key_status"].get(k_id, "✅ OK")
-                if status == "❌ LIMIT":
-                    st.markdown(f'<div class="key-box key-empty">🔑 {k_id}: LIMIT</div>', unsafe_allow_html=True)
-                elif st.session_state.get("using_key") == k_id:
-                    st.markdown(f'<div class="key-box key-active">🔑 {k_id}: AKTIVNÍ</div>', unsafe_allow_html=True)
-                else:
-                    st.markdown(f'<div class="key-box key-full">🔑 {k_id}: VOLNÝ</div>', unsafe_allow_html=True)
-            
-            st.divider()
-            st.subheader("🕵️ Live Spy")
-            for cid, cdata in global_store["all_chats"].items():
-                with st.expander(f"Chat: {cdata['title']}"):
-                    for m in cdata["msgs"]:
-                        st.write(f"**{m['role']}**: {m['content'][:70]}...")
 
 # --- HLAVNÍ PLOCHA ---
-current_chat = global_store["all_chats"][st.session_state.current_chat_id]
-st.header(f"💬 {current_chat['title']}")
+current_msgs = user_history[user_history['chat_id'] == st.session_state.current_chat_id]
+chat_title = current_msgs['title'].iloc[0] if not current_msgs.empty else "Nový chat"
 
-for msg in current_chat["msgs"]:
-    with st.chat_message(msg["role"]):
-        st.write(msg["content"])
+st.header(f"💬 {chat_title}")
+
+for _, m in current_msgs.iterrows():
+    with st.chat_message(m['role']):
+        st.write(m['content'])
 
 # --- LOGIKA CHATU ---
 if prompt := st.chat_input("Napište zprávu..."):
-    current_time = datetime.now().strftime("%d. %m. %Y %H:%M")
-    
-    # SYSTEM_INSTRUCTION pro správné chování
-    sys_instr = (
-        f"Jsi S.M.A.R.T. OS, přátelský asistent. Dnes je {current_time}. "
-        "Nepiš datum, čas ani pozdravy v každé zprávě. Tyto informace uveď POUZE, pokud se uživatel "
-        "přímo zeptá na čas nebo datum. Odpovídej plynule a lidsky."
-    )
-    
-    current_chat["msgs"].append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.write(prompt)
+    
+    new_title = chat_title if chat_title != "Nový chat" else prompt[:20]
+    # Uložíme zprávu uživatele hned
+    save_message(st.session_state.user_id, st.session_state.current_chat_id, new_title, "user", prompt)
 
-    if current_chat["title"] == "Nový chat":
-        current_chat["title"] = prompt[:25] + "..."
-
+    # Příprava klíčů ze secrets
+    api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11) if st.secrets.get(f"GOOGLE_API_KEY_{i}")]
+    
+    success = False
     for i, key in enumerate(api_keys):
         k_id = i + 1
-        if global_store["key_status"].get(k_id) == "❌ LIMIT": continue
+        # Jednoduchá kontrola limitu v paměti (pro live odezvu)
         try:
             genai.configure(api_key=key)
-            model = genai.GenerativeModel(model_name=model_choice, system_instruction=sys_instr)
-            st.session_state.using_key = k_id
+            model = genai.GenerativeModel(model_name="gemini-1.5-flash")
             
+            # Sestavení historie pro AI
             history_data = []
-            for m in current_chat["msgs"][:-1]:
-                history_data.append({"role": "user" if m["role"]=="user" else "model", "parts": [m["content"]]})
+            for _, m in current_msgs.iterrows():
+                history_data.append({"role": "user" if m['role']=="user" else "model", "parts": [m['content']]})
             
             chat = model.start_chat(history=history_data)
+            response = chat.send_message(prompt)
+            
             with st.chat_message("assistant"):
-                response = chat.send_message(prompt)
                 st.write(response.text)
-                current_chat["msgs"].append({"role": "assistant", "content": response.text})
+                # Uložíme odpověď AI a aktualizujeme statistiku klíče
+                save_message(st.session_state.user_id, st.session_state.current_chat_id, new_title, "assistant", response.text)
+                update_key_usage(k_id)
                 st.rerun()
+            success = True
             break 
         except Exception as e:
-            if "429" in str(e):
-                global_store["key_status"][k_id] = "❌ LIMIT"
-                continue
-            st.error(f"Chyba systému: {e}")
+            if "429" in str(e): continue # Zkusíme další klíč
+            st.error(f"Systém narazil na problém. Zkuste to za chvíli.")
             break
+
+    if not success and not api_keys:
+        st.error("Nejsou nastaveny žádné API klíče.")
