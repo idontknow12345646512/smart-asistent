@@ -6,18 +6,17 @@ import pandas as pd
 from datetime import datetime
 
 # --- KONFIGURACE ---
-st.set_page_config(page_title="S.M.A.R.T. OS v5.7", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. OS v5.9", page_icon="🤖", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 LIMIT_PER_KEY = 20 
 
-# --- IDENTIFIKACE ZAŘÍZENÍ (TRVALEJŠÍ) ---
-# Použijeme query parametry v URL, aby ID nezmizelo při refreshu
+# --- IDENTIFIKACE ZAŘÍZENÍ (TRVALÁ PŘES URL) ---
 query_params = st.query_params
 if "dev" in query_params:
     st.session_state.device_id = query_params["dev"]
 elif "device_id" not in st.session_state:
-    # Pokud ID neexistuje, vytvoříme nové a přidáme ho do URL
+    # Generování nového ID při první návštěvě a uložení do URL
     new_id = str(uuid.uuid4())[:8]
     st.session_state.device_id = new_id
     st.query_params["dev"] = new_id
@@ -51,17 +50,21 @@ def update_usage(k_id):
         s_df.loc[s_df['key_id'].astype(str) == k_id_str, 'used'] += 1
     conn.update(worksheet="Stats", data=s_df)
 
-# Načtení dat
+# Načtení dat a kontrola stavu modelů
 users_df, stats_df = load_db()
 total_used = stats_df['used'].astype(int).sum() if not stats_df.empty else 0
-is_lite_mode = total_used >= 200
+is_lite_mode = total_used >= 200 # Celkový limit pro v3.0 model
 user_history = users_df[users_df['user_id'] == st.session_state.device_id]
+
+# --- UI: UPOZORNĚNÍ NA LITE MODEL (NAHOŘE) ---
+if is_lite_mode:
+    st.warning("⚠️ Právě se používá úsporný model v2.5 z důvodu vysokého vytížení systému.", icon="ℹ️")
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🤖 S.M.A.R.T. OS")
     st.info(f"Vaše ID: {st.session_state.device_id}")
-    st.caption("Uložte si URL adresu pro návrat k chatům.")
+    st.caption("Pro zachování historie si uložte URL adresu do záložek.")
     
     if st.button("➕ Nový chat", use_container_width=True):
         st.session_state.current_chat_id = str(uuid.uuid4())
@@ -69,45 +72,90 @@ with st.sidebar:
 
     st.subheader("Moje historie")
     unique_chats = user_history[['chat_id', 'title']].drop_duplicates()
-    for _, row in unique_chats.iterrows():
-        if st.button(row['title'][:20], key=f"btn_{row['chat_id']}", use_container_width=True):
-            st.session_state.current_chat_id = row['chat_id']
-            st.rerun()
+    if not unique_chats.empty:
+        for _, row in unique_chats.iterrows():
+            if st.button(row['title'][:20], key=f"btn_{row['chat_id']}", use_container_width=True):
+                st.session_state.current_chat_id = row['chat_id']
+                st.rerun()
+    else:
+        st.write("Zatím žádná historie.")
 
-# --- CHAT ---
-if is_lite_mode:
-    st.warning("⚠️ Úsporný režim v2.5 (Lite).")
-
+# --- CHAT PLOCHA ---
 current_msgs = user_history[user_history['chat_id'] == st.session_state.current_chat_id]
 chat_title = current_msgs['title'].iloc[0] if not current_msgs.empty else "Nový chat"
 st.header(f"💬 {chat_title}")
 
+# Zobrazení zpráv z historie
 for _, m in current_msgs.iterrows():
-    with st.chat_message(m['role']): st.write(m['content'])
+    with st.chat_message(m['role']): 
+        st.write(m['content'])
 
-if prompt := st.chat_input("Zpráva..."):
-    with st.chat_message("user"): st.write(prompt)
+# --- LOGIKA ODPOVĚDI ---
+if prompt := st.chat_input("Napište zprávu..."):
+    with st.chat_message("user"): 
+        st.write(prompt)
+    
     new_title = chat_title if chat_title != "Nový chat" else prompt[:20]
     save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "user", prompt)
 
-    # Gemini logika (zůstává stejná jako dříve s modely gemini-2.5-flash)
     api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
+    # Přesné názvy modelů podle tvého zadání
     model_name = "gemini-2.5-flash" if not is_lite_mode else "gemini-2.5-flash-lite"
     
     success = False
     for i, key in enumerate(api_keys):
         if not key: continue
+        k_id = i + 1
+        
+        # Kontrola, zda konkrétní klíč nepřesáhl 20 pro v3.0 model
+        k_row = stats_df[stats_df['key_id'].astype(str) == str(k_id)]
+        k_usage = int(k_row['used'].iloc[0]) if not k_row.empty else 0
+        
+        if not is_lite_mode and k_usage >= LIMIT_PER_KEY:
+            continue 
+
         try:
             genai.configure(api_key=key)
             model = genai.GenerativeModel(model_name=model_name)
-            response = model.start_chat().send_message(prompt)
+            
+            # Sestavení historie pro Gemini
+            history_data = []
+            for _, m in current_msgs.iterrows():
+                history_data.append({"role": "user" if m['role'] == "user" else "model", "parts": [m['content']]})
+            
+            chat = model.start_chat(history=history_data)
+            response = chat.send_message(prompt)
+            
             with st.chat_message("assistant"):
                 st.write(response.text)
                 save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "assistant", response.text)
-                update_usage(i+1)
+                update_usage(k_id)
                 st.rerun()
             success = True
             break
-        except: continue
+        except Exception:
+            continue
 
-st.markdown("<div style='position: fixed; bottom: 0; width: 100%; text-align: center; color: gray; font-size: 0.7rem;'>S.M.A.R.T. OS může dělat chyby.</div>", unsafe_allow_html=True)
+    if not success:
+        st.error("Omlouváme se, všechny dostupné kapacity jsou vyčerpány.")
+
+# --- UI: PATIČKA (DOLE) ---
+st.markdown("""
+    <style>
+    .footer {
+        position: fixed;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        background-color: transparent;
+        color: gray;
+        text-align: center;
+        font-size: 0.75rem;
+        padding: 10px;
+        z-index: 100;
+    }
+    </style>
+    <div class="footer">
+        S.M.A.R.T. OS může dělat chyby. Ověřujte si důležité informace.
+    </div>
+    """, unsafe_allow_html=True)
