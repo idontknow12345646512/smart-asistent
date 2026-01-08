@@ -1,58 +1,64 @@
 import streamlit as st
 from streamlit_gsheets import GSheetsConnection
+import pandas as pd
 
-st.set_page_config(page_title="Admin Panel", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. Admin", page_icon="🔐")
 
-# --- TVRDÁ OCHRANA HESLEM ---
-if "admin_logged_in" not in st.session_state:
-    st.session_state.admin_logged_in = False
+st.title("🔐 S.M.A.R.T. Administrace")
 
-# Funkce pro zpracování hesla
-def check_password():
-    if st.session_state["pwd_input"] == st.secrets["ADMIN_PASSWORD"]:
-        st.session_state.admin_logged_in = True
-        st.success("Přihlášeno!")
-    else:
-        st.error("Nesprávné heslo!")
+# Heslo pro přístup
+pw = st.text_input("Zadejte administrátorské heslo", type="password")
+
+if pw == st.secrets["ADMIN_PASSWORD"]:
+    st.success("Přístup povolen")
     
-    # Tady se děje to kouzlo: Vymažeme hodnotu klíče 'pwd_input' ze stavu aplikace
-    st.session_state["pwd_input"] = ""
-
-if not st.session_state.admin_logged_in:
-    st.title("🔐 Chráněná zóna")
+    tab1, tab2, tab3 = st.tabs(["📊 Statistiky & Tabulky", "🧠 AI Konfigurace", "🛠 Systém"])
     
-    # Používáme parametr 'key', abychom k políčku mohli přistupovat přes session_state
-    # 'on_change' nebo přímý stisk tlačítka vyvolá smazání
-    st.text_input("Zadejte admin heslo", type="password", key="pwd_input")
+    conn = st.connection("gsheets", type=GSheetsConnection)
     
-    if st.button("Vstoupit"):
-        check_password()
-        # Pokud se heslo shodovalo, stránka se díky rerun() překreslí už jako přihlášená
-        if st.session_state.admin_logged_in:
-            st.rerun()
+    with tab1:
+        st.subheader("Data z Google Sheets")
+        try:
+            # Načtení tabulky Users
+            users_data = conn.read(worksheet="Users", ttl=0)
+            st.write("**Tabulka Users (Historie chatů):**")
+            st.dataframe(users_data, use_container_width=True)
             
-    st.stop() # Zastaví veškerý kód pod tímto řádkem
+            # Tlačítko pro stažení zálohy
+            csv = users_data.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Stáhnout zálohu Users CSV", data=csv, file_name="smart_backup.csv")
+            
+        except Exception as e:
+            st.error(f"Nepodařilo se načíst tabulky: {e}")
 
-# --- KÓD ADMINA (spustí se jen po přihlášení) ---
-# (Sem zkopíruj zbytek svého admin kódu z předchozí verze)
-conn = st.connection("gsheets", type=GSheetsConnection)
-st.title("📊 Administrace")
+    with tab2:
+        st.subheader("Nastavení inteligence")
+        
+        # Přepínač modelů
+        current_model = st.session_state.get("selected_model", "gemini-2.5-flash")
+        new_model = st.selectbox(
+            "Aktivní AI Model:",
+            ["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash"],
+            index=["gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-1.5-pro", "gemini-1.5-flash"].index(current_model)
+        )
+        if new_model != current_model:
+            st.session_state.selected_model = new_model
+            st.success(f"Model změněn na {new_model}")
 
-if st.button("Odhlásit"):
-    st.session_state.admin_logged_in = False
-    st.rerun()
+        st.divider()
+        st.write("**Co by měla obsahovat AI stránka:**")
+        st.info("""
+        1. **Prompt Engineering:** Možnost změnit hlavní instrukci (System Instruction) bez přepisování kódu.
+        2. **Temperature:** Posuvník pro kreativitu AI (0.0 = přesná, 1.0 = kreativní).
+        3. **Token Limit:** Nastavení maximální délky odpovědi.
+        4. **Usage Tracker:** Přehled kolik dotazů zbývá na jednotlivých API klíčích.
+        """)
 
-try:
-    users_df = conn.read(worksheet="Users", ttl=0)
-    stats_df = conn.read(worksheet="Stats", ttl=0)
-    
-    # Rychlé statistiky
-    total_used = stats_df['used'].sum()
-    st.metric("Celkem dotazů přes Flash modely", total_used)
-    
-    # Spy prohlížeč
-    uid = st.selectbox("Vyberte ID zařízení:", users_df['user_id'].unique())
-    st.table(users_df[users_df['user_id'] == uid])
+    with tab3:
+        st.subheader("Správa systému")
+        if st.button("🔥 Vymazat mezipaměť (Cache)"):
+            st.cache_data.clear()
+            st.success("Cache vymazána")
 
-except Exception as e:
-    st.error(f"Chyba při načítání dat: {e}")
+elif pw:
+    st.error("Nesprávné heslo")
