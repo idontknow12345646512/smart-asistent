@@ -93,7 +93,7 @@ if prompt := st.chat_input("Napište zprávu..."):
             genai.configure(api_key=key)
             model = genai.GenerativeModel(
                 model_name=model_name,
-                system_instruction="Jsi S.M.A.R.T. OS, inteligentní asistent. Pomáháš studentům se školou. Tvým uživatelem je Radek. Odpovídej vždy česky a k věci."
+                system_instruction="Jsi S.M.A.R.T. OS, inteligentní asistent. Pomáháš studentům se školou. Odpovídej vždy česky a k věci."
             )
             
             # Zahájení chatu s historií
@@ -123,3 +123,4 @@ if prompt := st.chat_input("Napište zprávu..."):
 
 st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="fixed-footer">S.M.A.R.T. OS může dělat chyby.</div>', unsafe_allow_html=True)
+
