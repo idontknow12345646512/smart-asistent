@@ -2,69 +2,49 @@ import streamlit as st
 from streamlit_gsheets import GSheetsConnection
 import pandas as pd
 
-st.set_page_config(page_title="S.M.A.R.T. Admin PRO", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. Admin", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- LOGIN ---
-if "admin_auth" not in st.session_state:
-    st.session_state.admin_auth = False
+# Tlačítko zpět
+if st.sidebar.button("⬅️ Zpět do chatu"):
+    st.switch_page("app.py")
 
-with st.sidebar:
-    pwd = st.text_input("Admin Heslo", type="password")
-    if st.button("Přihlásit"):
-        if pwd == st.secrets.get("ADMIN_PASSWORD"):
-            st.session_state.admin_auth = True
-            st.rerun()
+st.title("🔒 Administrace systému")
 
-if not st.session_state.admin_auth:
-    st.warning("Přístup odepřen. Zadejte heslo.")
-    st.stop()
-
-# --- ADMIN OBSAH ---
-st.title("🔒 S.M.A.R.T. OS - Centrála")
-
-users_df = conn.read(worksheet="Users", ttl=0)
-stats_df = conn.read(worksheet="Stats", ttl=0)
-
-# STATISTIKY KLÍČŮ
-st.subheader("🔑 Stav API klíčů")
-total_msgs = stats_df['used'].astype(int).sum() if not stats_df.empty else 0
-limit_max = 200 # 10 klíčů x 20
-
-# Ukazatel celkové kapacity
-st.write(f"Celkové využití High-Speed modelu: {total_msgs} / {limit_max}")
-st.progress(min(total_msgs / limit_max, 1.0))
-
-cols = st.columns(5)
-for i, row in stats_df.iterrows():
-    with cols[i % 5]:
-        val = int(row['used'])
-        color = "green" if val < 20 else "red"
-        st.markdown(f"""
-            <div style="border: 1px solid #333; padding: 10px; border-radius: 10px; text-align: center;">
-                <small>Klíč {row['key_id']}</small><br>
-                <b style="color: {color}; font-size: 1.2rem;">{val}</b> / 20
-            </div>
-        """, unsafe_allow_html=True)
-
-st.divider()
-
-# PROHLÍŽEČ ZPRÁV
-st.subheader("📂 Historie zpráv")
-if not users_df.empty:
-    # Filtry
-    u_list = users_df['user_id'].unique()
-    target_user = st.selectbox("Vyberte zařízení (Device ID):", u_list)
+try:
+    users_df = conn.read(worksheet="Users", ttl=0)
+    stats_df = conn.read(worksheet="Stats", ttl=0)
     
-    filtered = users_df[users_df['user_id'] == target_user]
+    total_used = stats_df['used'].astype(int).sum()
+    limit_max = 200
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Celkem zpráv", total_used)
+    col2.metric("Zařízení", users_df['user_id'].nunique() if not users_df.empty else 0)
+    col3.metric("Limit Flash", f"{total_used}/200")
+
+    st.write("**Vytížení High-Speed režimu:**")
+    st.progress(min(total_used / limit_max, 1.0))
+
+    st.divider()
+    st.subheader("🔑 Statistiky API klíčů")
     
-    for chat_id in filtered['chat_id'].unique():
-        c_data = filtered[filtered['chat_id'] == chat_id]
-        with st.expander(f"📄 Chat: {c_data['title'].iloc[0]} ({len(c_data)} zpráv)"):
-            for _, msg in c_data.iterrows():
-                icon = "👤" if msg['role'] == "user" else "🤖"
-                st.markdown(f"**{icon} {msg['role'].upper()}** <small style='color:gray'>{msg['timestamp']}</small>", unsafe_allow_html=True)
-                st.write(msg['content'])
-                st.divider()
-else:
-    st.info("Žádná data k zobrazení.")
+    cols = st.columns(5)
+    for i in range(1, 11):
+        with cols[(i-1)%5]:
+            row = stats_df[stats_df['key_id'].astype(str) == str(i)]
+            val = int(row['used'].iloc[0]) if not row.empty else 0
+            color = "green" if val < 20 else "red"
+            st.markdown(f"<div style='border:1px solid #444; padding:10px; border-radius:10px; text-align:center;'>Klíč {i}<br><b style='color:{color};'>{val}/20</b></div>", unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("🕵️ Live Spy Prohlížeč")
+    if not users_df.empty:
+        selected_user = st.selectbox("Vyberte ID zařízení:", users_df['user_id'].unique())
+        user_data = users_df[users_df['user_id'] == selected_user]
+        st.dataframe(user_data, use_container_width=True)
+    else:
+        st.info("Žádná data k zobrazení.")
+
+except Exception as e:
+    st.error(f"Chyba při načítání databáze: {e}")
