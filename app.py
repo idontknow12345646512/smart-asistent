@@ -5,12 +5,13 @@ import uuid
 import pandas as pd
 from datetime import datetime
 import extra_streamlit_components as stx
+import time
 
 # --- KONFIGURACE ---
 st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# CSS pro tvůj modrý obdélník
+# CSS pro modrý obdélník
 st.markdown("""
     <style>
     .thinking-box {
@@ -91,11 +92,10 @@ st.header(f"💬 {chat_title}")
 for _, m in current_msgs.iterrows():
     with st.chat_message(m['role']): st.write(m['content'])
 
-# --- VSTUP A PŘEMÝŠLENÍ ---
+# --- LOGIKA ODPOVĚDI SE STREAMINGEM ---
 if prompt := st.chat_input("Napište zprávu..."):
     with st.chat_message("user"): st.write(prompt)
     
-    # MODRÝ OBDÉLNÍK MÍSTO PROBLIKÁVÁNÍ KÓDU
     thinking_placeholder = st.empty()
     thinking_placeholder.markdown('<div class="thinking-box">🤖 SMART přemýšlí . . .</div>', unsafe_allow_html=True)
     
@@ -117,16 +117,27 @@ if prompt := st.chat_input("Napište zprávu..."):
                 history_data.append({"role": "user" if m['role'] == "user" else "model", "parts": [m['content']]})
             
             chat = model.start_chat(history=history_data)
-            response = chat.send_message(prompt)
             
-            # Jakmile máme odpověď, smažeme modrý box a ukážeme text
+            # TADY JE TA ZMĚNA: stream=True
+            response_stream = chat.send_message(prompt, stream=True)
+            
+            # Jakmile dorazí první kousek dat, smažeme modrý box
             thinking_placeholder.empty()
             
             with st.chat_message("assistant"):
-                st.write(response.text)
-                save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "assistant", response.text)
+                # Funkce pro generování kousků textu pro Streamlit
+                def stream_generator():
+                    for chunk in response_stream:
+                        yield chunk.text
+                
+                # Zobrazení plynulého psaní
+                full_response = st.write_stream(stream_generator())
+                
+                # Po dopsání uložíme a aktualizujeme statistiky
+                save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "assistant", full_response)
                 update_usage(i+1)
                 st.rerun()
+            
             success = True
             break
         except: continue
