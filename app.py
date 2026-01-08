@@ -20,19 +20,18 @@ st.markdown("""
         font-weight: bold; margin: 10px 0;
     }
 
-    /* Fixní patička - Zůstává vidět i během psaní */
+    /* Fixní patička pod oknem pro zprávu */
     .fixed-footer {
         position: fixed; left: 0; bottom: 0; width: 100%;
         text-align: center; color: gray; font-size: 0.8rem;
         padding: 10px; background: white; border-top: 1px solid #eee;
         z-index: 1000;
     }
-    /* Odsazení obsahu od patičky */
-    .main-content { margin-bottom: 60px; }
+    .main-content { margin-bottom: 70px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. SESSION STATE (Místo Cookies) ---
+# --- 2. SESSION STATE ---
 if "user_id" not in st.session_state:
     st.session_state.user_id = str(uuid.uuid4())[:8]
 if "chat_id" not in st.session_state:
@@ -61,56 +60,60 @@ current_chat = df[df["chat_id"] == st.session_state.chat_id]
 
 st.header(f"💬 Chat: {st.session_state.chat_id}")
 
-# Zobrazení historie
 st.markdown('<div class="main-content">', unsafe_allow_html=True)
 for _, m in current_chat.iterrows():
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-# --- 6. LOGIKA ODPOVĚDI (MODELY 2.5) ---
+# --- 6. LOGIKA ODPOVĚDI (S ROTACÍ KLÍČŮ A MODELY 2.5) ---
 if prompt := st.chat_input("Napište zprávu..."):
-    # Zobrazení uživatele hned
     with st.chat_message("user"):
         st.write(prompt)
     
-    # Indikátor přemýšlení
     thinking = st.empty()
     thinking.markdown('<div class="thinking-box">🤖 SMART přemýšlí...</div>', unsafe_allow_html=True)
 
-    # Automatický datum a čas
     now = datetime.now().strftime("%d.%m.%Y %H:%M")
+    
+    # Seznam všech 10 klíčů ze secrets
+    api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
+    model_name = st.session_state.get("selected_model", "gemini-2.5-flash")
+    
+    success = False
+    ai_text = ""
 
-    try:
-        # Nastavení API (bere první klíč)
-        genai.configure(api_key=st.secrets["GOOGLE_API_KEY_1"])
-        
-        # Určení modelu (Admin přepíná v admin.py, zde je default 2.5)
-        # Pokud v session_state z admin.py nic není, použijeme flash
-        model_name = st.session_state.get("selected_model", "gemini-2.5-flash")
-        model = genai.GenerativeModel(
-            model_name=model_name,
-            system_instruction="Jsi S.M.A.R.T. OS, inteligentní asistent. Tvým hlavním úkolem je pomáhat studentům se školou, vysvětlovat látku a řešit úkoly plynule a srozumitelně."
-        )
-        
-        # Generování (v4.2 styl - bez streamování pro max. stabilitu)
-        response = model.generate_content(prompt)
-        ai_text = response.text
-        
-        thinking.empty()
-        
+    # Zkoušíme klíče jeden po druhém, dokud jeden nezafunguje
+    for key in api_keys:
+        if not key: continue
+        try:
+            genai.configure(api_key=key)
+            model = genai.GenerativeModel(
+                model_name=model_name,
+                system_instruction="Jsi S.M.A.R.T. OS, inteligentní asistent. Pomáháš studentům se školou, vysvětluješ látku a řešíš úkoly plynule a srozumitelně."
+            )
+            
+            response = model.generate_content(prompt)
+            ai_text = response.text
+            success = True
+            break # Klíč fungoval, končíme smyčku
+        except Exception:
+            continue # Chyba u tohoto klíče, zkusíme další
+
+    thinking.empty()
+
+    if success:
         with st.chat_message("assistant"):
             st.write(ai_text)
             
-        # Zápis do GSheets
+        # Zápis obou zpráv do GSheets najednou
         u_row = pd.DataFrame([{"user_id": st.session_state.user_id, "chat_id": st.session_state.chat_id, "title": prompt[:20], "role": "user", "content": prompt, "timestamp": now}])
         ai_row = pd.DataFrame([{"user_id": st.session_state.user_id, "chat_id": st.session_state.chat_id, "title": prompt[:20], "role": "assistant", "content": ai_text, "timestamp": now}])
         
         updated_df = pd.concat([df, u_row, ai_row], ignore_index=True)
         conn.update(worksheet="Users", data=updated_df)
-        
-    except Exception as e:
-        thinking.empty()
-        st.error(f"Chyba: {e}")
+    else:
+        st.error("❌ Všechny API klíče jsou momentálně nedostupné.")
+
 st.markdown('</div>', unsafe_allow_html=True)
 
 # --- 7. FIXNÍ PATIČKA ---
