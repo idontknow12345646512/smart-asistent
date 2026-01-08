@@ -7,39 +7,43 @@ from datetime import datetime
 import extra_streamlit_components as stx
 
 # --- KONFIGURACE ---
-st.set_page_config(page_title="S.M.A.R.T. OS v6.0", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- COOKIES A IDENTIFIKACE ---
+# CSS pro tvůj modrý obdélník
+st.markdown("""
+    <style>
+    .thinking-box {
+        background-color: #e1f5fe;
+        border-left: 5px solid #0288d1;
+        padding: 15px;
+        border-radius: 5px;
+        color: #01579b;
+        font-weight: bold;
+        margin: 10px 0;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- COOKIES ---
+@st.cache_resource
 def get_manager():
     return stx.CookieManager()
 
 cookie_manager = get_manager()
-
-# Načtení ID z cookies
 device_id = cookie_manager.get(cookie="smart_os_device_id")
 
-# Pokud cookie neexistuje, vytvoříme nové ID a uložíme ho
 if not device_id:
-    # Vygenerujeme ID, pokud ještě není v session_state (aby se neměnilo při každém průběhu)
-    if "temp_device_id" not in st.session_state:
-        st.session_state.temp_device_id = str(uuid.uuid4())[:8]
-    
-    device_id = st.session_state.temp_device_id
-    
-    # Uložíme do cookies na 1 rok (365 dní)
+    if "temp_id" not in st.session_state:
+        st.session_state.temp_id = str(uuid.uuid4())[:8]
+    device_id = st.session_state.temp_id
     cookie_manager.set("smart_os_device_id", device_id, expires_at=datetime.now() + pd.Timedelta(days=365))
-else:
-    st.session_state.device_id = device_id
-
-# Zajištění, že máme device_id v session_state pro zbytek kódu
-if "device_id" not in st.session_state:
-    st.session_state.device_id = device_id
+st.session_state.device_id = device_id
 
 if "current_chat_id" not in st.session_state:
     st.session_state.current_chat_id = str(uuid.uuid4())
 
-# --- FUNKCE PRO DATABÁZI ---
+# --- DB FUNKCE ---
 def load_db():
     try:
         u_df = conn.read(worksheet="Users", ttl=0)
@@ -74,23 +78,12 @@ user_history = users_df[users_df['user_id'] == st.session_state.device_id]
 # --- SIDEBAR ---
 with st.sidebar:
     st.title("🤖 S.M.A.R.T. OS")
-    st.info(f"Zařízení rozpoznáno: {st.session_state.device_id}")
-    
+    st.info(f"ID: {st.session_state.device_id}")
     if st.button("➕ Nový chat", use_container_width=True):
         st.session_state.current_chat_id = str(uuid.uuid4())
         st.rerun()
 
-    st.subheader("Moje historie")
-    unique_chats = user_history[['chat_id', 'title']].drop_duplicates()
-    for _, row in unique_chats.iterrows():
-        if st.button(row['title'][:20], key=f"btn_{row['chat_id']}", use_container_width=True):
-            st.session_state.current_chat_id = row['chat_id']
-            st.rerun()
-
-# --- CHAT PLOCHA ---
-if is_lite_mode:
-    st.warning("⚠️ Úsporný režim (Model v2.5).")
-
+# --- CHAT ---
 current_msgs = user_history[user_history['chat_id'] == st.session_state.current_chat_id]
 chat_title = current_msgs['title'].iloc[0] if not current_msgs.empty else "Nový chat"
 st.header(f"💬 {chat_title}")
@@ -98,9 +91,14 @@ st.header(f"💬 {chat_title}")
 for _, m in current_msgs.iterrows():
     with st.chat_message(m['role']): st.write(m['content'])
 
-# --- LOGIKA CHATU ---
+# --- VSTUP A PŘEMÝŠLENÍ ---
 if prompt := st.chat_input("Napište zprávu..."):
     with st.chat_message("user"): st.write(prompt)
+    
+    # MODRÝ OBDÉLNÍK MÍSTO PROBLIKÁVÁNÍ KÓDU
+    thinking_placeholder = st.empty()
+    thinking_placeholder.markdown('<div class="thinking-box">🤖 SMART přemýšlí . . .</div>', unsafe_allow_html=True)
+    
     new_title = chat_title if chat_title != "Nový chat" else prompt[:20]
     save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "user", prompt)
 
@@ -121,6 +119,9 @@ if prompt := st.chat_input("Napište zprávu..."):
             chat = model.start_chat(history=history_data)
             response = chat.send_message(prompt)
             
+            # Jakmile máme odpověď, smažeme modrý box a ukážeme text
+            thinking_placeholder.empty()
+            
             with st.chat_message("assistant"):
                 st.write(response.text)
                 save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "assistant", response.text)
@@ -130,5 +131,8 @@ if prompt := st.chat_input("Napište zprávu..."):
             break
         except: continue
 
-# --- PATIČKA ---
-st.markdown("<div style='position: fixed; bottom: 0; width: 100%; text-align: center; color: gray; font-size: 0.75rem; padding: 10px; background: transparent;'>S.M.A.R.T. OS může dělat chyby. Ověřujte si důležité informace.</div>", unsafe_allow_html=True)
+    if not success:
+        thinking_placeholder.empty()
+        st.error("Kapacita vyčerpána.")
+
+st.markdown("<div style='position: fixed; bottom: 0; width: 100%; text-align: center; color: gray; font-size: 0.75rem; padding: 10px;'>S.M.A.R.T. OS může dělat chyby.</div>", unsafe_allow_html=True)
