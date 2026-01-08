@@ -1,133 +1,83 @@
 import streamlit as st
-import google.generativeai as genai
 from streamlit_gsheets import GSheetsConnection
-import uuid
 import pandas as pd
-from datetime import datetime
 
-# --- KONFIGURACE ---
-st.set_page_config(page_title="S.M.A.R.T. OS v5.2", page_icon="🤖", layout="wide")
+st.set_page_config(page_title="S.M.A.R.T. Admin PRO", layout="wide")
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-# Limity
-LIMIT_PER_KEY = 20  # Počet zpráv na jeden klíč pro hlavní model
+# --- PŘIHLÁŠENÍ ---
+if "admin_auth" not in st.session_state:
+    st.session_state.admin_auth = False
 
-# --- IDENTIFIKACE ZAŘÍZENÍ ---
-if "device_id" not in st.session_state:
-    st.session_state.device_id = str(uuid.uuid4())[:12]
-if "current_chat_id" not in st.session_state:
-    st.session_state.current_chat_id = str(uuid.uuid4())
-
-# --- FUNKCE PRO DATABÁZI ---
-def load_db():
-    try:
-        u_df = conn.read(worksheet="Users", ttl=0)
-        s_df = conn.read(worksheet="Stats", ttl=0)
-        return u_df, s_df
-    except:
-        return pd.DataFrame(columns=["user_id", "chat_id", "title", "role", "content", "timestamp"]), \
-               pd.DataFrame(columns=["key_id", "used"])
-
-def save_message(user_id, chat_id, title, role, content):
-    u_df, _ = load_db()
-    now = datetime.now().strftime("%d.%m.%Y %H:%M")
-    new_row = pd.DataFrame([{"user_id": user_id, "chat_id": chat_id, "title": title, "role": role, "content": content, "timestamp": now}])
-    conn.update(worksheet="Users", data=pd.concat([u_df, new_row], ignore_index=True))
-
-def update_usage(k_id):
-    _, s_df = load_db()
-    k_id_str = str(k_id)
-    if k_id_str not in s_df['key_id'].astype(str).values:
-        new_row = pd.DataFrame([{"key_id": k_id_str, "used": 1}])
-        s_df = pd.concat([s_df, new_row], ignore_index=True)
-    else:
-        s_df.loc[s_df['key_id'].astype(str) == k_id_str, 'used'] += 1
-    conn.update(worksheet="Stats", data=s_df)
-
-# --- NAČTENÍ DAT ---
-users_df, stats_df = load_db()
-user_history = users_df[users_df['user_id'] == st.session_state.device_id]
-
-# --- SIDEBAR ---
 with st.sidebar:
-    st.title("🤖 S.M.A.R.T. OS")
-    st.caption(f"Zařízení: {st.session_state.device_id}")
-    
-    # Výpočet celkového využití pro zobrazení adminovi/tobě
-    total_used = stats_df['used'].astype(int).sum() if not stats_df.empty else 0
-    
-    # Zjistíme, jaký model se aktuálně použije (Uživatel to nemusí vědět, ale ty to uvidíš)
-    current_mode = "Gemini 2.5 Flash" if total_used < (10 * LIMIT_PER_KEY) else "Gemini 2.5 Flash Lite"
-    st.info(f"Režim: {current_mode}")
-
-    if st.button("➕ Nový chat", use_container_width=True):
-        st.session_state.current_chat_id = str(uuid.uuid4())
-        st.rerun()
-
-    st.subheader("Moje historie")
-    unique_chats = user_history[['chat_id', 'title']].drop_duplicates()
-    for _, row in unique_chats.iterrows():
-        if st.button(row['title'][:20], key=f"btn_{row['chat_id']}", use_container_width=True):
-            st.session_state.current_chat_id = row['chat_id']
+    st.title("🔐 Admin Vstup")
+    pwd = st.text_input("Heslo", type="password")
+    if st.button("Přihlásit"):
+        if pwd == st.secrets.get("ADMIN_PASSWORD"):
+            st.session_state.admin_auth = True
             st.rerun()
 
-# --- CHAT PLOCHA ---
-current_msgs = user_history[user_history['chat_id'] == st.session_state.current_chat_id]
-chat_title = current_msgs['title'].iloc[0] if not current_msgs.empty else "Nový chat"
-st.header(f"💬 {chat_title}")
+if not st.session_state.admin_auth:
+    st.warning("Pro přístup k administraci se musíte přihlásit.")
+    st.stop()
 
-for _, m in current_msgs.iterrows():
-    with st.chat_message(m['role']): st.write(m['content'])
+# --- HLAVNÍ ADMIN PANEL ---
+st.title("🔒 S.M.A.R.T. OS - Centrální dohled")
 
-# --- LOGIKA CHATU ---
-if prompt := st.chat_input("Napište zprávu..."):
-    with st.chat_message("user"): st.write(prompt)
-    
-    new_title = chat_title if chat_title != "Nový chat" else prompt[:20]
-    save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "user", prompt)
+users_df = conn.read(worksheet="Users", ttl=0)
+stats_df = conn.read(worksheet="Stats", ttl=0)
 
-    # Načtení všech 10 klíčů
-    api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
-    
-    success = False
-    # ROZHODOVACÍ LOGIKA:
-    # 1. Nejdříve zkusíme najít klíč, který má pod 20 zpráv a použít Flash
-    # 2. Pokud jsou všechny nad 20, použijeme Flash Lite
-    
-    selected_model_name = "gemini-2.5-flash" if total_used < (10 * LIMIT_PER_KEY) else "gemini-2.5-flash-lite"
+# --- 1. STATISTIKY KLÍČŮ ---
+st.header("📊 Využití systému")
+total_msgs = stats_df['used'].astype(int).sum() if not stats_df.empty else 0
+limit_max = 200
 
-    for i, key in enumerate(api_keys):
-        if not key: continue
-        k_id = i + 1
+col1, col2, col3 = st.columns(3)
+col1.metric("Celkem zpráv (Flash)", f"{total_msgs} / {limit_max}")
+col2.metric("Aktivních zařízení", users_df['user_id'].nunique() if not users_df.empty else 0)
+col3.metric("Režim", "LITE" if total_msgs >= limit_max else "HIGH-SPEED")
+
+st.write("**Celková vytíženost Flash modelu:**")
+st.progress(min(total_msgs / limit_max, 1.0))
+
+# Mřížka klíčů
+st.subheader("🔑 Jednotlivé klíče")
+cols = st.columns(5)
+for i in range(1, 11):
+    with cols[(i-1) % 5]:
+        # Najdeme hodnotu pro klíč i
+        row = stats_df[stats_df['key_id'].astype(str) == str(i)]
+        val = int(row['used'].iloc[0]) if not row.empty else 0
         
-        # Zjistíme využití tohoto konkrétního klíče
-        key_usage = stats_df[stats_df['key_id'].astype(str) == str(k_id)]['used'].iloc[0] if str(k_id) in stats_df['key_id'].astype(str).values else 0
-        
-        # Pokud už jsme v Lite režimu, bereme první funkční klíč. 
-        # Pokud jsme ve Flash režimu, bereme ten, co má pod 20.
-        if selected_model_name == "gemini-2.5-flash" and key_usage >= LIMIT_PER_KEY:
-            continue 
+        color = "#28a745" if val < 20 else "#dc3545"
+        st.markdown(f"""
+            <div style="border: 1px solid #444; padding: 10px; border-radius: 8px; text-align: center; margin-bottom: 10px;">
+                <small>Klíč {i}</small><br>
+                <b style="color: {color}; font-size: 1.1rem;">{val} / 20</b>
+            </div>
+        """, unsafe_allow_html=True)
 
-        try:
-            genai.configure(api_key=key)
-            model = genai.GenerativeModel(model_name=selected_model_name)
-            
-            history_data = []
-            for _, m in current_msgs.iterrows():
-                history_data.append({"role": "user" if m['role'] == "user" else "model", "parts": [m['content']]})
-            
-            chat = model.start_chat(history=history_data)
-            response = chat.send_message(prompt)
-            
-            with st.chat_message("assistant"):
-                st.write(response.text)
-                save_message(st.session_state.device_id, st.session_state.current_chat_id, new_title, "assistant", response.text)
-                update_usage(k_id)
-                st.rerun()
-            success = True
-            break 
-        except Exception:
-            continue
+st.divider()
 
-    if not success:
-        st.error("Všechny kapacity jsou momentálně vyčerpány.")
+# --- 2. LIVE SPY PROHLÍŽEČ ---
+st.header("🕵️ Prohlížeč historie")
+if not users_df.empty:
+    u_list = users_df['user_id'].unique()
+    selected_device = st.selectbox("Vyberte zařízení (Device ID):", u_list)
+    
+    filtered_data = users_df[users_df['user_id'] == selected_device]
+    
+    for chat_id in filtered_data['chat_id'].unique():
+        chat_msgs = filtered_data[filtered_data['chat_id'] == chat_id]
+        with st.expander(f"📄 Chat: {chat_msgs['title'].iloc[0]} ({len(chat_msgs)} zpráv)"):
+            for _, msg in chat_msgs.iterrows():
+                role_icon = "👤" if msg['role'] == "user" else "🤖"
+                st.markdown(f"**{role_icon} {msg['role'].upper()}** <small style='color:gray'>{msg['timestamp']}</small>", unsafe_allow_html=True)
+                st.write(msg['content'])
+                st.divider()
+else:
+    st.info("Zatím nejsou k dispozici žádná data o chatech.")
+
+if st.sidebar.button("Odhlásit"):
+    st.session_state.admin_auth = False
+    st.rerun()
