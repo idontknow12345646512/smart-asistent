@@ -106,7 +106,7 @@ if prompt := st.chat_input("Napište zprávu..."):
         conn.update(worksheet="Users", data=pd.concat([users_df, user_row], ignore_index=True))
 
         api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
-        model_name = "gemini-1.5-flash" if not is_lite_mode else "gemini-1.5-flash-lite"
+        model_name = "gemini-2.5-flash" if not is_lite_mode else "gemini-2.5-flash-lite"
         
         success = False
         for i, key in enumerate(api_keys):
@@ -157,3 +157,4 @@ if prompt := st.chat_input("Napište zprávu..."):
             st.error("Chyba spojení.")
 
 st.markdown('<div class="footer">S.M.A.R.T. OS může dělat chyby.</div>', unsafe_allow_html=True)
+
