@@ -81,7 +81,7 @@ if prompt:
     # Rotace klíčů
     api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
     # Výběr modelu
-    model_to_use = "gemini-3-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
+    model_to_use = "gemini-2.5-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
     
     # Sestavení zprávy
     parts = [{"text": prompt}]
@@ -129,3 +129,4 @@ if prompt:
         st.error("Chyba: AI neodpovídá. Zkontroluj API klíče v Secrets.")
 
 st.markdown('</div>', unsafe_allow_html=True)
+
