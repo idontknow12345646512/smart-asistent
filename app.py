@@ -5,12 +5,12 @@ import pandas as pd
 from datetime import datetime
 import uuid
 
-# --- 1. DESIGN ---
+# --- 1. DESIGN (Čistý styl z v4 + tvoje úpravy) ---
 st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide")
 
 st.markdown("""
     <style>
-    /* Skrytí ID a menu (Červená zóna) */
+    /* Skrytí horní lišty a ID (Červená zóna) */
     header { visibility: hidden; }
     .stDeployButton { display: none !important; }
     
@@ -18,8 +18,8 @@ st.markdown("""
     .stApp { background-color: #0e1117; }
     .main-content { max-width: 800px; margin: 0 auto; padding-bottom: 160px; }
 
-    /* Fixní kontejner pro nahrávání nad inputem (Žlutá zóna - PLUS) */
-    .upload-bar {
+    /* ŽLUTÁ ZÓNA - Tlačítko PLUS nad inputem */
+    .upload-container {
         position: fixed;
         bottom: 85px;
         left: 50%;
@@ -27,36 +27,40 @@ st.markdown("""
         width: 90%;
         max-width: 800px;
         z-index: 1000;
+        background: #1e2129;
+        border-radius: 10px;
+        padding: 5px;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABÁZE ---
+# --- 2. DATABÁZE (Stabilní z v4) ---
 conn = st.connection("gsheets", type=GSheetsConnection)
+
 def load_data():
     try:
         u = conn.read(worksheet="Users", ttl=0)
         s = conn.read(worksheet="Stats", ttl=0)
+        return u, s
     except:
-        u = pd.DataFrame(columns=["user_id", "chat_id", "role", "content", "timestamp"])
-        s = pd.DataFrame([{"key": "total_messages", "value": "0"}])
-    return u, s
+        return pd.DataFrame(columns=["user_id", "chat_id", "role", "content", "timestamp"]), \
+               pd.DataFrame([{"key": "total_messages", "value": "0"}])
 
 users_df, stats_df = load_data()
 total_msgs = int(stats_df.loc[stats_df['key'] == 'total_messages', 'value'].values[0]) if not stats_df.empty else 0
 
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())[:8]
 
-# --- 3. SIDEBAR (Šipka pro otevření) ---
+# --- 3. SIDEBAR (Se šipkou pro ovládání) ---
 with st.sidebar:
     st.title("🤖 S.M.A.R.T. OS")
     if st.button("➕ Nový chat", use_container_width=True):
         st.session_state.chat_id = str(uuid.uuid4())[:8]
         st.rerun()
     st.divider()
-    st.caption(f"Celkem zpráv: {total_msgs}/200")
+    st.caption(f"Využití limitu: {total_msgs}/200")
 
-# --- 4. CHAT PLOCHA ---
+# --- 4. CHAT (Stabilní výpis) ---
 st.markdown('<div class="main-content">', unsafe_allow_html=True)
 cur_chat = users_df[users_df["chat_id"] == st.session_state.chat_id]
 
@@ -64,50 +68,47 @@ for _, m in cur_chat.iterrows():
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-# --- 5. PLUS TLAČÍTKO A INPUT ---
-# Tady je to "PLUS" přímo nad psaním
+# --- 5. PLUS TLAČÍTKO A INPUT (Žlutá zóna) ---
 with st.container():
-    st.markdown('<div class="upload-bar">', unsafe_allow_html=True)
-    up_file = st.file_uploader("➕", type=["png", "jpg", "jpeg", "pdf", "txt"], label_visibility="collapsed")
-    st.markdown('</div>', unsafe_allow_html=True)
+    # Malý widget pro nahrávání fungující jako "+"
+    up_file = st.file_uploader("➕ Přidat soubor (obrázek, PDF, text)", type=["png", "jpg", "jpeg", "pdf", "txt"])
     
     prompt = st.chat_input("Zeptejte se na cokoliv...")
 
-# --- 6. OPRAVENÁ AI LOGIKA ---
+# --- 6. AI LOGIKA (Spolehlivá metoda z v4) ---
 if prompt:
     with st.chat_message("user"):
         st.write(prompt)
     
-    # Rotace klíčů
+    # Výběr modelu (v3 nebo v2.5 dle limitu)
+    model_name = "gemini-3-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
     api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
-    # Výběr modelu
-    model_to_use = "gemini-2.5-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
     
-    # Sestavení zprávy
-    parts = [{"text": prompt}]
+    # Příprava obsahu (text + soubor)
+    content_parts = [prompt]
     if up_file:
-        file_bytes = up_file.read()
+        raw_data = up_file.read()
         if up_file.type == "text/plain":
-            parts.append({"text": f"\nObsah souboru:\n{file_bytes.decode('utf-8')}"})
+            content_parts.append(f"\nObsah souboru {up_file.name}:\n{raw_data.decode('utf-8')}")
         else:
-            parts.append({"inline_data": {"mime_type": up_file.type, "data": file_bytes}})
+            content_parts.append({"mime_type": up_file.type, "data": raw_data})
 
     success = False
     for key in api_keys:
         if not key or success: continue
         try:
             genai.configure(api_key=key)
+            # Konfigurace modelu s vynucenou češtinou
             model = genai.GenerativeModel(
-                model_name=model_to_use,
-                system_instruction="Jsi S.M.A.R.T. OS. Mluv VŽDY ČESKY. Jsi asistent pro studenty."
+                model_name=model_name,
+                system_instruction="Jsi S.M.A.R.T. OS. Odpovídej VŽDY ČESKY. Jsi pomocník pro studenty."
             )
-            # Volání generování (opraveno pro v3 a v2.5)
-            response = model.generate_content(parts)
             
-            if response.text:
-                ai_text = response.text
-                success = True
-                break
+            # Generování odpovědi
+            response = model.generate_content(content_parts)
+            ai_text = response.text
+            success = True
+            break
         except:
             continue
 
@@ -115,18 +116,17 @@ if prompt:
         with st.chat_message("assistant"):
             st.markdown(ai_text)
         
-        # Uložení
+        # Uložení do tabulky
         now = datetime.now().strftime("%H:%M")
         u_row = pd.DataFrame([{"user_id": "public", "chat_id": st.session_state.chat_id, "role": "user", "content": prompt, "timestamp": now}])
         a_row = pd.DataFrame([{"user_id": "public", "chat_id": st.session_state.chat_id, "role": "assistant", "content": ai_text, "timestamp": now}])
         conn.update(worksheet="Users", data=pd.concat([users_df, u_row, a_row], ignore_index=True))
         
-        # Statistiky
+        # Update limitu
         stats_df.loc[stats_df['key'] == 'total_messages', 'value'] = str(total_msgs + 1)
         conn.update(worksheet="Stats", data=stats_df)
         st.rerun()
     else:
-        st.error("Chyba: AI neodpovídá. Zkontroluj API klíče v Secrets.")
+        st.error("AI neodpovídá. Zkontrolujte API klíče.")
 
 st.markdown('</div>', unsafe_allow_html=True)
-
