@@ -6,37 +6,51 @@ from datetime import datetime
 import uuid
 import io
 
-# --- 1. KONFIGURACE A STYLY ---
-st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide")
+# --- 1. KONFIGURACE A STYLING (ODSTRANĚNÍ RUŠIVÝCH PRVKŮ) ---
+st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
 
 st.markdown("""
     <style>
-    /* Skrytí červených ID a systémových lišt */
-    [data-testid="stStatusWidget"], .stDeployButton, footer, #MainMenu, header { display: none !important; }
+    /* Skrytí systémových prvků (ČERVENÁ ZNAČENÍ NA OBRÁZKU) */
+    header, footer, .stDeployButton, [data-testid="stStatusWidget"], [data-testid="stHeader"] { display: none !important; }
     
-    /* Úprava barvy pozadí a textu pro mobilní přehlednost */
+    /* Celkové pozadí */
     .stApp { background-color: #0e1117; }
-    
-    /* Styl pro kontejner chatu */
-    .main-content { margin-bottom: 120px; }
 
-    /* Úprava chat inputu - aby vypadal moderně a čistě */
+    /* KONTEJNER PRO CHAT (BÍLÁ ZNAČENÍ - PŘEMÍSTĚNÍ) */
+    .main-chat-container {
+        max-width: 850px;
+        margin: 0 auto;
+        padding-bottom: 150px;
+    }
+
+    /* ÚPRAVA INPUTU (IKONA + MÍSTO TEXTU) */
     div[data-testid="stChatInput"] {
-        border-radius: 15px !important;
-        background-color: #1e2129 !important;
+        border-radius: 25px !important;
+        border: 1px solid #30363d !important;
+        background-color: #161b22 !important;
+        padding-left: 10px;
     }
 
-    /* Fixní patička sladěná s pozadím */
-    .fixed-footer {
-        position: fixed; left: 0; bottom: 0; width: 100%;
-        text-align: center; color: #555; font-size: 0.7rem;
-        padding: 5px; background: #0e1117;
-        border-top: 1px solid #262730; z-index: 999;
+    /* ŠIPKA PRO SIDEBAR (ŽLUTÉ ZNAČENÍ) */
+    .sidebar-toggle {
+        position: fixed;
+        top: 15px;
+        left: 15px;
+        z-index: 9999;
+        cursor: pointer;
+        background: #1f2937;
+        padding: 8px;
+        border-radius: 50%;
+        color: white;
     }
+
+    /* Odstranění bílého pruhu dole */
+    [data-testid="stBottom"] { background: none !important; border: none !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATABÁZE A STATISTIKY ---
+# --- 2. LOGIKA DAT ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
@@ -56,46 +70,38 @@ if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4(
 
 # --- 4. SIDEBAR ---
 with st.sidebar:
-    st.title("🤖 S.M.A.R.T. OS")
-    st.caption(f"Zprávy celkem: {total_msgs}/200")
+    st.markdown("### 🤖 S.M.A.R.T. OS")
+    st.caption(f"Využití: {total_msgs}/200")
     if st.button("➕ Nový chat", use_container_width=True):
         st.session_state.chat_id = str(uuid.uuid4())[:8]
         st.rerun()
+    st.divider()
+    # PŘEMÍSTĚNÉ NAHRÁVÁNÍ (skryté v sidebaru nebo pod +)
+    up_file = st.file_uploader("Nahrát podklady (+)", type=["png", "jpg", "jpeg", "pdf", "txt"], label_visibility="visible")
 
-# --- 5. CHAT ROZHRANÍ ---
-st.markdown('<div class="main-content">', unsafe_allow_html=True)
+# --- 5. CHAT OKNO ---
+st.markdown('<div class="main-chat-container">', unsafe_allow_html=True)
+
 cur_chat = users_df[users_df["chat_id"] == st.session_state.chat_id]
 
+# Zobrazení zpráv
 for _, m in cur_chat.iterrows():
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-# --- 6. INTEGROVANÉ NAHRÁVÁNÍ SOUBORŮ ("+") ---
-# Na mobilu je lepší mít nahrávání hned nad inputem
-with st.container():
-    col1, col2 = st.columns([1, 6])
-    with col1:
-        # Tlačítko pro soubor stylizované jako "+"
-        up_file = st.file_uploader("➕", type=["png", "jpg", "jpeg", "pdf", "txt"], label_visibility="collapsed")
-    
-    with col2:
-        prompt = st.chat_input("Napište zprávu...")
-
-# --- 7. LOGIKA ODPOVĚDI (VŽDY ČESKY) ---
-if prompt:
+# --- 6. CHAT INPUT A AI LOGIKA ---
+if prompt := st.chat_input("Zeptejte se na cokoliv..."):
     with st.chat_message("user"):
         st.write(prompt)
-        if up_file: st.caption(f"📎 Soubor: {up_file.name}")
     
-    # Výběr modelu
+    # Automatické přepínání modelů
     active_model = "gemini-3-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
     api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
     
-    # Příprava dat pro AI
     payload = [prompt]
     if up_file:
         fb = up_file.read()
-        if up_file.type == "text/plain": payload.append(f"\nObsah: {fb.decode('utf-8')}")
+        if up_file.type == "text/plain": payload.append(f"Obsah souboru: {fb.decode('utf-8')}")
         else: payload.append({"mime_type": up_file.type, "data": fb})
 
     success = False
@@ -105,30 +111,32 @@ if prompt:
             genai.configure(api_key=key)
             m = genai.GenerativeModel(
                 model_name=active_model,
-                tools=[{"google_search_retrieval": {}}],
-                system_instruction="Jsi S.M.A.R.T. OS. Odpovídej VŽDY ČESKY. Pomáhej studentům. Pokud vidíš obrázek nebo PDF, podrobně ho analyzuj."
+                system_instruction="Jsi S.M.A.R.T. OS. Odpovídej VŽDY ČESKY. Buď nápomocný asistent pro studenty."
             )
-            res = m.generate_content(payload)
+            # Pokus s vyhledáváním, při selhání bez něj (pojistka proti chybě spojení)
+            try:
+                res = m.generate_content(payload, tools=[{"google_search_retrieval": {}}])
+            except:
+                res = m.generate_content(payload)
+                
             txt = res.text
             success = True
             break
-        except:
-            continue
+        except: continue
 
     if success:
         with st.chat_message("assistant"):
             st.markdown(txt)
         
-        # Uložení
-        now = datetime.now().strftime("%d.%m.%Y %H:%M")
+        # Uložení do tabulky
+        now = datetime.now().strftime("%H:%M")
         u_row = pd.DataFrame([{"user_id": "public", "chat_id": st.session_state.chat_id, "role": "user", "content": prompt, "timestamp": now}])
         a_row = pd.DataFrame([{"user_id": "public", "chat_id": st.session_state.chat_id, "role": "assistant", "content": txt, "timestamp": now}])
         conn.update(worksheet="Users", data=pd.concat([users_df, u_row, a_row], ignore_index=True))
         
-        # Update statistik
+        # Aktualizace Stats
         stats_df.loc[stats_df['key'] == 'total_messages', 'value'] = str(total_msgs + 1)
         conn.update(worksheet="Stats", data=stats_df)
         st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
-st.markdown('<div class="fixed-footer">S.M.A.R.T. OS (v8.1) | Vždy česky</div>', unsafe_allow_html=True)
