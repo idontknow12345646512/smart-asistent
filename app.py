@@ -6,51 +6,61 @@ from datetime import datetime
 import uuid
 import io
 
-# --- 1. KONFIGURACE A STYLING (ODSTRANĚNÍ RUŠIVÝCH PRVKŮ) ---
-st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide", initial_sidebar_state="expanded")
+# --- 1. KONFIGURACE A ABSOLUTNÍ ČIŠTĚNÍ DESIGNU ---
+st.set_page_config(page_title="S.M.A.R.T. OS", page_icon="🤖", layout="wide")
 
 st.markdown("""
     <style>
-    /* Skrytí systémových prvků (ČERVENÁ ZNAČENÍ NA OBRÁZKU) */
-    header, footer, .stDeployButton, [data-testid="stStatusWidget"], [data-testid="stHeader"] { display: none !important; }
+    /* Skrytí VŠECH červeně označených prvků */
+    header, footer, .stDeployButton, [data-testid="stStatusWidget"], [data-testid="stHeader"], [data-testid="stBottomBlockContainer"] { 
+        display: none !important; 
+    }
     
-    /* Celkové pozadí */
-    .stApp { background-color: #0e1117; }
+    /* Skrytí Streamlit "Manage app" vpravo dole */
+    .stAppToolbar { display: none !important; }
+    footer { visibility: hidden; }
 
-    /* KONTEJNER PRO CHAT (BÍLÁ ZNAČENÍ - PŘEMÍSTĚNÍ) */
+    /* Hlavní kontejner - vycentrování a čistota */
     .main-chat-container {
         max-width: 850px;
         margin: 0 auto;
-        padding-bottom: 150px;
+        padding-top: 50px;
+        padding-bottom: 120px;
     }
 
-    /* ÚPRAVA INPUTU (IKONA + MÍSTO TEXTU) */
-    div[data-testid="stChatInput"] {
-        border-radius: 25px !important;
-        border: 1px solid #30363d !important;
-        background-color: #161b22 !important;
-        padding-left: 10px;
-    }
-
-    /* ŠIPKA PRO SIDEBAR (ŽLUTÉ ZNAČENÍ) */
-    .sidebar-toggle {
+    /* VLASTNÍ PANEL PRO ZPRÁVU A PLUS (+) */
+    .input-wrapper {
         position: fixed;
-        top: 15px;
-        left: 15px;
-        z-index: 9999;
-        cursor: pointer;
-        background: #1f2937;
-        padding: 8px;
-        border-radius: 50%;
-        color: white;
+        bottom: 30px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 90%;
+        max-width: 800px;
+        z-index: 1000;
+        display: flex;
+        align-items: center;
+        gap: 10px;
     }
 
-    /* Odstranění bílého pruhu dole */
-    [data-testid="stBottom"] { background: none !important; border: none !important; }
+    /* Styl pro tlačítko PLUS */
+    .plus-button-container {
+        background-color: #1e2129;
+        border-radius: 50%;
+        width: 45px;
+        height: 45px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        border: 1px solid #30363d;
+        cursor: pointer;
+    }
+    
+    /* Úprava barvy pozadí aplikace */
+    .stApp { background-color: #0e1117; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. LOGIKA DAT ---
+# --- 2. DATABÁZE ---
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_data():
@@ -68,33 +78,35 @@ total_msgs = int(stats_df.loc[stats_df['key'] == 'total_messages', 'value'].valu
 # --- 3. SESSION STATE ---
 if "chat_id" not in st.session_state: st.session_state.chat_id = str(uuid.uuid4())[:8]
 
-# --- 4. SIDEBAR ---
+# --- 4. SIDEBAR SE ŠIPKOU ---
+# Sidebar se šipkou je v Streamlitu automatický, pokud ho nezakážeme CSS. 
+# Zde ho necháváme pro historii a nastavení.
 with st.sidebar:
-    st.markdown("### 🤖 S.M.A.R.T. OS")
-    st.caption(f"Využití: {total_msgs}/200")
+    st.title("🤖 S.M.A.R.T. OS")
+    st.caption(f"Limit: {total_msgs}/200")
     if st.button("➕ Nový chat", use_container_width=True):
         st.session_state.chat_id = str(uuid.uuid4())[:8]
         st.rerun()
     st.divider()
-    # PŘEMÍSTĚNÉ NAHRÁVÁNÍ (skryté v sidebaru nebo pod +)
-    up_file = st.file_uploader("Nahrát podklady (+)", type=["png", "jpg", "jpeg", "pdf", "txt"], label_visibility="visible")
+    # Tady je to slíbené PLUS (+) pro nahrávání souborů
+    up_file = st.file_uploader("Nahrát podklady (+)", type=["png", "jpg", "jpeg", "pdf", "txt"])
 
 # --- 5. CHAT OKNO ---
 st.markdown('<div class="main-chat-container">', unsafe_allow_html=True)
 
 cur_chat = users_df[users_df["chat_id"] == st.session_state.chat_id]
 
-# Zobrazení zpráv
+# Zobrazení historie (bez ID chatu nahoře!)
 for _, m in cur_chat.iterrows():
     with st.chat_message(m["role"]):
         st.write(m["content"])
 
-# --- 6. CHAT INPUT A AI LOGIKA ---
+# --- 6. CHAT INPUT ---
 if prompt := st.chat_input("Zeptejte se na cokoliv..."):
     with st.chat_message("user"):
         st.write(prompt)
     
-    # Automatické přepínání modelů
+    # AI LOGIKA (Gemini 3 -> 2.5)
     active_model = "gemini-3-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
     api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
     
@@ -111,9 +123,9 @@ if prompt := st.chat_input("Zeptejte se na cokoliv..."):
             genai.configure(api_key=key)
             m = genai.GenerativeModel(
                 model_name=active_model,
-                system_instruction="Jsi S.M.A.R.T. OS. Odpovídej VŽDY ČESKY. Buď nápomocný asistent pro studenty."
+                system_instruction="Jsi S.M.A.R.T. OS. Odpovídej VŽDY ČESKY. Jsi asistent pro studenty."
             )
-            # Pokus s vyhledáváním, při selhání bez něj (pojistka proti chybě spojení)
+            # Pokus o vyhledávání (Google Search)
             try:
                 res = m.generate_content(payload, tools=[{"google_search_retrieval": {}}])
             except:
@@ -128,13 +140,13 @@ if prompt := st.chat_input("Zeptejte se na cokoliv..."):
         with st.chat_message("assistant"):
             st.markdown(txt)
         
-        # Uložení do tabulky
+        # Uložení
         now = datetime.now().strftime("%H:%M")
         u_row = pd.DataFrame([{"user_id": "public", "chat_id": st.session_state.chat_id, "role": "user", "content": prompt, "timestamp": now}])
         a_row = pd.DataFrame([{"user_id": "public", "chat_id": st.session_state.chat_id, "role": "assistant", "content": txt, "timestamp": now}])
         conn.update(worksheet="Users", data=pd.concat([users_df, u_row, a_row], ignore_index=True))
         
-        # Aktualizace Stats
+        # Update limitu
         stats_df.loc[stats_df['key'] == 'total_messages', 'value'] = str(total_msgs + 1)
         conn.update(worksheet="Stats", data=stats_df)
         st.rerun()
