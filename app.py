@@ -81,7 +81,7 @@ if prompt:
         st.write(prompt)
     
     # Výběr modelu (v3 nebo v2.5 dle limitu)
-    model_name = "gemini-3-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
+    model_name = "gemini-2.5-flash" if total_msgs < 200 else "gemini-2.5-flash-lite"
     api_keys = [st.secrets.get(f"GOOGLE_API_KEY_{i}") for i in range(1, 11)]
     
     # Příprava obsahu (text + soubor)
@@ -130,3 +130,4 @@ if prompt:
         st.error("AI neodpovídá. Zkontrolujte API klíče.")
 
 st.markdown('</div>', unsafe_allow_html=True)
+
